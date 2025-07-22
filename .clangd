@@ -1,0 +1,22 @@
+CompileFlags:
+  CompilationDatabase:
+    Directory: .
+  Remove:
+    - -mtext-section-literals
+    - -mlongcalls
+    - -fipa-pta
+    - -free
+  Add:
+    - -I./wled00         # relative path to the WLED core headers
+    - -include
+    - stdint.h            # pre‑include the standard integer typedefs
+
+Diagnostics:
+  Suppress:
+    - "init_conversion_failed"
+    - "invalid_token_after_toplevel_declarator"
+    - "ovl_no_viable_member_function_in_call"
+    - "pp_file_not_found"
+    - "redefinition_different_typedef"
+    - "typecheck_incomplete_array_needs_initializer"
+    - "undeclared_var_use"
