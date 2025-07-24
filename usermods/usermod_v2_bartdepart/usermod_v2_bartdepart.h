@@ -1,8 +1,11 @@
 #pragma once
+#include <memory>
 
 #include "wled.h"
 #include "WiFiClientSecure.h"
 #include <HTTPClient.h>
+
+#include "train_platform_model.h"
 
 #define BARTDEPART_VERSION "0.0.1"
 
@@ -34,6 +37,12 @@ private:
   String apiStation = "19th";
 #endif
 
+#ifdef BARTDEPART_DEFAULT_PLATFORM_ID
+  String platformId = BARTDEPART_DEFAULT_PLATFORM_ID;
+#else
+  String platformId = "1";
+#endif
+
   // Define constants
   static const uint8_t myLockId = USERMOD_ID_BARTDEPART;   // Used for requestJSONBufferLock(id)
 
@@ -41,7 +50,7 @@ private:
   WiFiClientSecure client;
   HTTPClient https;
 
-  void fetchData();
+  std::vector<TrainPlatformModel> platforms_;
 
 public:
   void setup();
@@ -54,6 +63,7 @@ public:
   virtual ~BartDepart();
 
 protected:
+  std::unique_ptr<DynamicJsonDocument> fetchData();
   String composeApiUrl();
   void showBooting();
   void showLoading();
