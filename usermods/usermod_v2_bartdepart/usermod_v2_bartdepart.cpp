@@ -4,8 +4,9 @@
 const char CFG_NAME[] = "BartDepart";
 const char CFG_ENABLED[] = "Enabled";
 const char CFG_UPDATE_SECS[] = "UpdateSecs";
+const char CFG_API_BASE[] = "ApiBase";
 const char CFG_API_KEY[] = "ApiKey";
-const char CFG_API_URL[] = "ApiUrl";
+const char CFG_API_STATION[] = "ApiStation";
 
 const uint16_t SAFETY_DELAY_MSEC = 5000;
 
@@ -69,8 +70,9 @@ bool BartDepart::readFromConfig(JsonObject& root) {
   // Retrieve the values using the getJsonValue function for better error handling
   configComplete &= getJsonValue(top[FPSTR(CFG_ENABLED)], enabled, enabled);
   configComplete &= getJsonValue(top[FPSTR(CFG_UPDATE_SECS)], updateSecs, updateSecs);
+  configComplete &= getJsonValue(top[FPSTR(CFG_API_BASE)], apiBase, apiBase);
   configComplete &= getJsonValue(top[FPSTR(CFG_API_KEY)], apiKey, apiKey);
-  configComplete &= getJsonValue(top[FPSTR(CFG_API_URL)], apiUrl, apiUrl);
+  configComplete &= getJsonValue(top[FPSTR(CFG_API_STATION)], apiStation, apiStation);
 
   return configComplete;
 }
@@ -83,18 +85,45 @@ void BartDepart::addToConfig(JsonObject& root) {
   // Write the configuration parameters to the nested object
   top[FPSTR(CFG_ENABLED)] = enabled;
   top[FPSTR(CFG_UPDATE_SECS)] = updateSecs;
+  top[FPSTR(CFG_API_BASE)] = apiBase;
   top[FPSTR(CFG_API_KEY)] = apiKey;
-  top[FPSTR(CFG_API_URL)] = apiUrl;
+  top[FPSTR(CFG_API_STATION)] = apiStation;
 
   if (enabled==false)
     // Unfreeze the main segment after disabling the module
     strip.getMainSegment().freeze=false;
 }
 
+String BartDepart::composeApiUrl() {
+  String url;
+  url  = apiBase;
+  url += "&key=";
+  url += apiKey;
+  url += "&orig=";
+  url += apiStation;
+  return url;
+}
+
 void BartDepart::fetchData() {
-  DEBUG_PRINTLN(F("BartDepart::fetchData starting"));
+  unsigned long t0 = millis();
   showLoading();
-  DEBUG_PRINTLN(F("BartDepart::fetchData finished"));
+  String url = composeApiUrl();
+  DEBUG_PRINTLN(String(F("BartDepart::fetchData starting ")) + url);
+
+  https.begin(client, url);
+  int httpCode = https.GET();
+  if (httpCode > 0) {
+    // Success—read payload as a String
+    String payload = https.getString();
+    DEBUG_PRINTLN(String(F("BartDepart::fetchData HTTP: "))
+                  + httpCode + F(" ") + payload);
+  } else {
+    DEBUG_PRINTLN(String(F("BartDepart::fetchData FAILED: "))
+                  + https.errorToString(httpCode));
+  }
+  https.end();
+  unsigned long dt = millis() - t0; // elapsed ms
+  DEBUG_PRINTLN(String(F("BartDepart::fetchData finished in ")) + dt + F(" ms"));
 }
 
 void BartDepart::showBooting() {
