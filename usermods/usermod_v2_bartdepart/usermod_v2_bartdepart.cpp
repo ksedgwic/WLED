@@ -112,16 +112,49 @@ void BartDepart::fetchData() {
 
   https.begin(client, url);
   int httpCode = https.GET();
-  if (httpCode > 0) {
-    // Success—read payload as a String
-    String payload = https.getString();
-    DEBUG_PRINTLN(String(F("BartDepart::fetchData HTTP: "))
-                  + httpCode + F(" ") + payload);
-  } else {
+  if (httpCode <= 0) {
     DEBUG_PRINTLN(String(F("BartDepart::fetchData FAILED: "))
                   + https.errorToString(httpCode));
+    https.end();
+    return;
   }
+
+  String payload = https.getString();
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData HTTP: "))
+  //               + httpCode + F(" ") + payload);
   https.end();
+
+  size_t jsonSzEstimate = payload.length() * 2;
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData: json capacity: ")) + jsonSzEstimate);
+  DynamicJsonDocument doc(jsonSzEstimate);
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    DEBUG_PRINTLN(String(F("BartDepart::fetchData: parse JSON failed: ")) + err.c_str());
+    return;
+  }
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData: json usage: ")) + doc.memoryUsage());
+
+  JsonObject root = doc["root"].as<JsonObject>();
+  if (root.isNull()) {
+    DEBUG_PRINTLN(F("BartDepart::fetchData: Missing ‘root’ object"));
+    return;
+  }
+  String date = root["date"] | "";
+  String time = root["time"] | "";
+  String stationName = "";
+  if (root["station"].is<JsonArray>()) {
+    JsonArray stations = root["station"].as<JsonArray>();
+    if (stations.size() > 0) {
+      stationName = stations[0]["name"] | "";
+    }
+  }
+  DEBUG_PRINTLN(String(F("BartDepart::fetchData saw:"))
+                + F(" date:\"") + date
+                + F("\", time:\"") + time
+                + F("\", stationName:\"") + stationName
+                + F("\"")
+                );
+
   unsigned long dt = millis() - t0; // elapsed ms
   DEBUG_PRINTLN(String(F("BartDepart::fetchData finished in ")) + dt + F(" ms"));
 }
