@@ -1,5 +1,7 @@
 #include "usermod_v2_bartdepart.h"
 #include <cstdint>
+#include <ctime>
+#include <memory>
 
 const char CFG_NAME[] = "BartDepart";
 const char CFG_ENABLED[] = "Enabled";
@@ -7,6 +9,7 @@ const char CFG_UPDATE_SECS[] = "UpdateSecs";
 const char CFG_API_BASE[] = "ApiBase";
 const char CFG_API_KEY[] = "ApiKey";
 const char CFG_API_STATION[] = "ApiStation";
+const char CFG_PLATFORM_ID[] = "Platform";
 
 const uint16_t SAFETY_DELAY_MSEC = 5000;
 
@@ -19,13 +22,13 @@ static unsigned long startTs;
 BartDepart::~BartDepart() { /* nothing */ }
 
 void BartDepart::setup() {
-  // NOTE - if you are using UDP logging the DEBUG_PRINTLN in this
-  // routine will likely not show up because this is prior to WiFi
-  // being up.
-
   // NOTE - it's a really bad idea to crash or deadlock in this
   // method; you won't be able to use OTA update and will have to
   // resort to a serial connection to unbrick your controller ...
+
+  // NOTE - if you are using UDP logging the DEBUG_PRINTLNs in this
+  // routine will likely not show up because this is prior to WiFi
+  // being up.
 
   DEBUG_PRINTLN(F("BartDepart::setup starting"));
 
@@ -41,6 +44,8 @@ void BartDepart::setup() {
 
   client.setInsecure();	// don't validate certs
 
+  platforms_.emplace_back(platformId);
+
   startTs = millis();
 
   DEBUG_PRINTLN(F("BartDepart::setup finished"));
@@ -55,7 +60,19 @@ void BartDepart::loop() {
 
   if (safetyWaitDone && enabled && !offMode) {
     if (millis() - lastCheck >= updateSecs * 1000) {
-      fetchData();
+      auto doc = fetchData();
+      if (doc) {
+        JsonObject top  = doc->as<JsonObject>();
+        JsonObject data = top["root"].as<JsonObject>();
+        if (!data.isNull()) {
+          for (auto& platform : platforms_) {
+            platform.update(data);
+            DEBUG_PRINTLN(String(F("BartDepart::loop: ")) + platform.toString());
+          }
+        } else {
+          DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
+        }
+      }
       lastCheck = millis();
     }
   }
@@ -73,6 +90,7 @@ bool BartDepart::readFromConfig(JsonObject& root) {
   configComplete &= getJsonValue(top[FPSTR(CFG_API_BASE)], apiBase, apiBase);
   configComplete &= getJsonValue(top[FPSTR(CFG_API_KEY)], apiKey, apiKey);
   configComplete &= getJsonValue(top[FPSTR(CFG_API_STATION)], apiStation, apiStation);
+  configComplete &= getJsonValue(top[FPSTR(CFG_PLATFORM_ID)], platformId, platformId);
 
   return configComplete;
 }
@@ -88,6 +106,10 @@ void BartDepart::addToConfig(JsonObject& root) {
   top[FPSTR(CFG_API_BASE)] = apiBase;
   top[FPSTR(CFG_API_KEY)] = apiKey;
   top[FPSTR(CFG_API_STATION)] = apiStation;
+  top[FPSTR(CFG_PLATFORM_ID)] = platformId;
+
+  platforms_.clear();
+  platforms_.emplace_back(platformId);
 
   if (enabled==false)
     // Unfreeze the main segment after disabling the module
@@ -104,11 +126,11 @@ String BartDepart::composeApiUrl() {
   return url;
 }
 
-void BartDepart::fetchData() {
-  unsigned long t0 = millis();
+std::unique_ptr<DynamicJsonDocument> BartDepart::fetchData() {
+  // unsigned long t0 = millis();
   showLoading();
   String url = composeApiUrl();
-  DEBUG_PRINTLN(String(F("BartDepart::fetchData starting ")) + url);
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData starting ")) + url);
 
   https.begin(client, url);
   int httpCode = https.GET();
@@ -116,7 +138,7 @@ void BartDepart::fetchData() {
     DEBUG_PRINTLN(String(F("BartDepart::fetchData FAILED: "))
                   + https.errorToString(httpCode));
     https.end();
-    return;
+    return nullptr;
   }
 
   String payload = https.getString();
@@ -126,18 +148,18 @@ void BartDepart::fetchData() {
 
   size_t jsonSzEstimate = payload.length() * 2;
   // DEBUG_PRINTLN(String(F("BartDepart::fetchData: json capacity: ")) + jsonSzEstimate);
-  DynamicJsonDocument doc(jsonSzEstimate);
-  DeserializationError err = deserializeJson(doc, payload);
+  std::unique_ptr<DynamicJsonDocument> doc(new DynamicJsonDocument(jsonSzEstimate));
+  DeserializationError err = deserializeJson(*doc, payload);
   if (err) {
     DEBUG_PRINTLN(String(F("BartDepart::fetchData: parse JSON failed: ")) + err.c_str());
-    return;
+    return nullptr;
   }
-  // DEBUG_PRINTLN(String(F("BartDepart::fetchData: json usage: ")) + doc.memoryUsage());
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData: json usage: ")) + doc->memoryUsage());
 
-  JsonObject root = doc["root"].as<JsonObject>();
+  JsonObject root = (*doc)["root"].as<JsonObject>();
   if (root.isNull()) {
     DEBUG_PRINTLN(F("BartDepart::fetchData: Missing ‘root’ object"));
-    return;
+    return nullptr;
   }
   String date = root["date"] | "";
   String time = root["time"] | "";
@@ -148,15 +170,16 @@ void BartDepart::fetchData() {
       stationName = stations[0]["name"] | "";
     }
   }
-  DEBUG_PRINTLN(String(F("BartDepart::fetchData saw:"))
-                + F(" date:\"") + date
-                + F("\", time:\"") + time
-                + F("\", stationName:\"") + stationName
-                + F("\"")
-                );
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData saw:"))
+  //               + F(" date:\"") + date
+  //               + F("\", time:\"") + time
+  //               + F("\", stationName:\"") + stationName
+  //               + F("\"")
+  //               );
 
-  unsigned long dt = millis() - t0; // elapsed ms
-  DEBUG_PRINTLN(String(F("BartDepart::fetchData finished in ")) + dt + F(" ms"));
+  // unsigned long dt = millis() - t0; // elapsed ms
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData finished in ")) + dt + F(" ms"));
+  return doc;
 }
 
 void BartDepart::showBooting() {
