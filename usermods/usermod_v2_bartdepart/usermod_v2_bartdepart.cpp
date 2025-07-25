@@ -1,7 +1,9 @@
-#include "usermod_v2_bartdepart.h"
 #include <cstdint>
 #include <ctime>
 #include <memory>
+
+#include "usermod_v2_bartdepart.h"
+#include "util.h"
 
 const char CFG_NAME[] = "BartDepart";
 const char CFG_ENABLED[] = "Enabled";
@@ -52,28 +54,39 @@ void BartDepart::setup() {
 }
 
 void BartDepart::loop() {
-
   // FIXME: safety delay to allow us to offMode before impending crash
   if (!safetyWaitDone && millis() - startTs >= SAFETY_DELAY_MSEC) {
     safetyWaitDone = true;
   }
 
-  if (safetyWaitDone && enabled && !offMode) {
-    if (millis() - lastCheck >= updateSecs * 1000) {
-      auto doc = fetchData();
-      if (doc) {
-        JsonObject top  = doc->as<JsonObject>();
-        JsonObject data = top["root"].as<JsonObject>();
-        if (!data.isNull()) {
-          for (auto& platform : platforms_) {
-            platform.update(data);
-            DEBUG_PRINTLN(String(F("BartDepart::loop: ")) + platform.toString());
-          }
-        } else {
-          DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
+  // reasons to inhibit running
+  if (!safetyWaitDone || !enabled || offMode) return;
+
+  // get our SNTP‑synced epoch (0 until it’s ready)
+  time_t nowSec = now();
+  if (nowSec == 0) return;              // not synced yet
+
+  // integer‐divide into periods of length updateSecs
+  static long lastPeriod = -1;
+  long period = nowSec / updateSecs;    // e.g. if updateSecs=60, period increments on each minute
+
+  // only fire once per new period
+  if (period != lastPeriod) {
+    lastPeriod = period;
+
+    // do the fetch
+    auto doc = fetchData();
+    if (doc) {
+      JsonObject top  = doc->as<JsonObject>();
+      JsonObject data = top["root"].as<JsonObject>();
+      if (!data.isNull()) {
+        for (auto& platform : platforms_) {
+          platform.update(data);
+          DEBUG_PRINTLN(String(F("BartDepart::loop: ")) + platform.toString());
         }
+      } else {
+        DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
       }
-      lastCheck = millis();
     }
   }
 }
