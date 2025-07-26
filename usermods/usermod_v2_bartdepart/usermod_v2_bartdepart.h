@@ -55,6 +55,7 @@ private:
 public:
   void setup();
   void loop();
+  void handleOverlayDraw() override;
   bool readFromConfig(JsonObject &root);
   void addToConfig(JsonObject &root);
   uint16_t getId() { return USERMOD_ID_BARTDEPART; }
@@ -66,5 +67,5 @@ protected:
   std::unique_ptr<DynamicJsonDocument> fetchData();
   String composeApiUrl();
   void showBooting();
-  void showLoading();
+  void doneBooting();
 };
