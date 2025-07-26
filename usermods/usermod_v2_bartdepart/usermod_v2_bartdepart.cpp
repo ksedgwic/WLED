@@ -57,6 +57,7 @@ void BartDepart::loop() {
   // FIXME: safety delay to allow us to offMode before impending crash
   if (!safetyWaitDone && millis() - startTs >= SAFETY_DELAY_MSEC) {
     safetyWaitDone = true;
+    doneBooting();
   }
 
   // reasons to inhibit running
@@ -88,6 +89,14 @@ void BartDepart::loop() {
         DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
       }
     }
+  }
+}
+
+void BartDepart::handleOverlayDraw() {
+  time_t now = ::now();
+  size_t segment = 0;
+  for (auto& platform : platforms_) {
+    platform.display(now, segment++);
   }
 }
 
@@ -141,7 +150,6 @@ String BartDepart::composeApiUrl() {
 
 std::unique_ptr<DynamicJsonDocument> BartDepart::fetchData() {
   // unsigned long t0 = millis();
-  showLoading();
   String url = composeApiUrl();
   // DEBUG_PRINTLN(String(F("BartDepart::fetchData starting ")) + url);
 
@@ -199,21 +207,17 @@ void BartDepart::showBooting() {
   Segment& seg = strip.getMainSegment();
   seg.setMode(28); // Set to chase
   seg.speed = 200;
-  seg.intensity = 255;
+  // seg.intensity = 255; // preserve user's settings via webapp
   seg.setPalette(128);
   seg.setColor(0, 0x404060);
   seg.setColor(1, 0x000000);
   seg.setColor(2, 0x303040);
 }
 
-void BartDepart::showLoading() {
+void BartDepart::doneBooting() {
   Segment& seg = strip.getMainSegment();
-  seg.setMode(28); // Set to chase
-  seg.speed = 200;
-  seg.intensity = 255;
-  seg.setPalette(128);
-  seg.setColor(0, 0x604040);
-  seg.setColor(1, 0x000000);
-  seg.setColor(2, 0x403030);
+  seg.freeze = true;    // stop any further segment animation
+  seg.setMode(0);       // static palette/color mode
+  // seg.intensity = 255;  // preserve user's settings via webapp
 }
 

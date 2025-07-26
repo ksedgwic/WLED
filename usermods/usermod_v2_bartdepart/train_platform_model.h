@@ -25,7 +25,11 @@ public:
   explicit TrainPlatformModel(const String& platformId)
     : platformId_(platformId) {}
 
+  // update the departure estimates based on the json object
   void update(const JsonObject& root);
+
+  // display the departure estimates on the LED strip segment
+  void display(time_t now, size_t segment);
 
   String toString() const;
 

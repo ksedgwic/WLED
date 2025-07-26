@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "wled.h"
+
 #include "train_platform_model.h"
 #include "util.h"
 
@@ -37,6 +39,65 @@ void TrainPlatformModel::update(const JsonObject &root) {
   history_.push_back(std::move(batch));
   while (history_.size() > 5) {
     history_.pop_front();
+  }
+}
+
+// helper to map your TrainColor enum → CRGB
+static CRGB colorFromTrainColor(TrainColor tc) {
+  switch(tc) {
+    case TrainColor::Red:    return CRGB(255,  0,  0);
+    case TrainColor::Orange: return CRGB(255,150, 30);
+    case TrainColor::Yellow: return CRGB(255,255,  0);
+    case TrainColor::Green:  return CRGB(  0,255,  0);
+    case TrainColor::Blue:   return CRGB(  0,  0,255);
+    case TrainColor::White:  return CRGB(255,255,255);
+    default:                 return CRGB(  0,  0,  0);
+  }
+}
+
+void TrainPlatformModel::display(time_t now, size_t segment) {
+  if (history_.empty()) return;
+  const ETDBatch& batch = history_.back();
+
+  // fetch segment start/stop
+  auto &seg = strip.getSegment(segment);
+  seg.freeze = true;
+  int  start = seg.start;
+  int    end = seg.stop;    // inclusive
+  int     len = end - start + 1;
+
+  // clear it
+  for (int i = start; i <= end; i++) {
+    strip.setPixelColor(i, 0);  // off
+  }
+
+  // for each ETD, plot it
+  for (auto &e : batch.etds) {
+    float diffMin = float(e.estDep - now) / 60.0f;
+    if (diffMin < 0 || diffMin >= len) continue;
+
+    int   idx  = int(floor(diffMin));        // primary LED index
+    float frac = diffMin - float(idx);       // cross‐fade fraction
+
+    CRGB  col  = colorFromTrainColor(e.color);
+
+    // primary LED gets (1–frac)×full brightness
+    uint8_t b1 = uint8_t((1.0f - frac) * 255);
+    strip.setPixelColor(start + idx,
+        ((uint32_t)col.r * b1 / 255) << 16 |
+        ((uint32_t)col.g * b1 / 255) <<  8 |
+        ((uint32_t)col.b * b1 / 255)
+    );
+
+    // secondary LED (if in bounds) gets frac×full brightness
+    if (idx + 1 < len) {
+      uint8_t b2 = uint8_t(frac * 255);
+      strip.setPixelColor(start + idx + 1,
+        ((uint32_t)col.r * b2 / 255) << 16 |
+        ((uint32_t)col.g * b2 / 255) <<  8 |
+        ((uint32_t)col.b * b2 / 255)
+      );
+    }
   }
 }
 
