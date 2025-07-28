@@ -3,7 +3,12 @@
 
 #include "wled.h"
 #include "WiFiClientSecure.h"
-#include <HTTPClient.h>
+
+#if defined(ARDUINO_ARCH_ESP8266)
+  #include <ESP8266HTTPClient.h>
+#else
+  #include <HTTPClient.h>
+#endif
 
 #include "train_platform_model.h"
 
