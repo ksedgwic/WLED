@@ -55,6 +55,11 @@ private:
   WiFiClientSecure client;
   HTTPClient https;
 
+  time_t   nextFetchSec    = 0; // when to try the next fetch
+  time_t   lastFetchSec    = 0; // time of the most recent attempt
+  uint8_t  backoffMult     = 1; // 1,2,4,8,16
+  bool     prevOffMode     = false;
+
   std::vector<TrainPlatformModel> platforms_;
 
 public:
