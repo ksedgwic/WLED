@@ -44,6 +44,11 @@ void BartDepart::setup() {
   DEBUG_PRINTLN(F("BartDepart::showBooting"));
   showBooting();
 
+  prevOffMode = offMode;
+  nextFetchSec = 0;
+  lastFetchSec = 0;
+  backoffMult  = 1;
+
   client.setInsecure();	// don't validate certs
 
   platforms_.emplace_back(platformId);
@@ -60,37 +65,66 @@ void BartDepart::loop() {
     doneBooting();
   }
 
-  // reasons to inhibit running
-  if (!safetyWaitDone || !enabled || offMode) return;
+  // are we running?  consider resetting backoff
+  if (!safetyWaitDone || !enabled || offMode) {
+    // detect offMode toggles to reset back‑off on next resume
+    if (offMode != prevOffMode) {
+      backoffMult  = 1;
+      nextFetchSec = 0;
+      prevOffMode  = offMode;
+    }
+    return;
+  }
 
-  // get our SNTP‑synced epoch (0 until it’s ready)
+  // detect coming back ON and reset back‑off
+  if (offMode != prevOffMode) {
+    backoffMult  = 1;
+    nextFetchSec = 0;
+    prevOffMode  = offMode;
+  }
+
   time_t nowSec = now();
-  if (nowSec == 0) return;              // not synced yet
+  if (nowSec == 0 || nowSec < nextFetchSec) return;
 
-  // integer‐divide into periods of length updateSecs
-  static long lastPeriod = -1;
-  long period = nowSec / updateSecs;    // e.g. if updateSecs=60, period increments on each minute
+  // record that we *are* attempting now
+  lastFetchSec = nowSec;
 
-  // only fire once per new period
-  if (period != lastPeriod) {
-    lastPeriod = period;
+  // do the fetch
+  auto doc = fetchData();
 
-    // do the fetch
-    auto doc = fetchData();
-    if (doc) {
-      JsonObject top  = doc->as<JsonObject>();
+  bool success = false;
+  if (doc) {
+       success = true;
+
+      // on success: reset multiplier and schedule next at 1× interval
+      backoffMult = 1;
+      nextFetchSec = lastFetchSec + updateSecs;
+
+      JsonObject top = doc->as<JsonObject>();
       JsonObject data = top["root"].as<JsonObject>();
       if (!data.isNull()) {
-        for (auto& platform : platforms_) {
+        for (auto &platform : platforms_) {
           platform.update(data);
           DEBUG_PRINTLN(String(F("BartDepart::loop: ")) + platform.toString());
         }
       } else {
         DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
       }
-    }
+  }
+
+  if (success) {
+    // reset back‑off
+    backoffMult  = 1;
+    nextFetchSec = lastFetchSec + updateSecs;
+  } else {
+    // failure or missing root → back‑off
+    backoffMult  = min<uint8_t>(backoffMult * 2, 16);
+    nextFetchSec = lastFetchSec + updateSecs * backoffMult;
+    DEBUG_PRINTLN(String(F("BartDepart::loop: Backoff: retry in "))
+                  + String(updateSecs * backoffMult) + F("s"));
   }
 }
+
 
 void BartDepart::handleOverlayDraw() {
   time_t now = ::now();
@@ -163,8 +197,7 @@ std::unique_ptr<DynamicJsonDocument> BartDepart::fetchData() {
   }
 
   String payload = https.getString();
-  // DEBUG_PRINTLN(String(F("BartDepart::fetchData HTTP: "))
-  //               + httpCode + F(" ") + payload);
+  // DEBUG_PRINTLN(String(F("BartDepart::fetchData HTTP: ")) + httpCode + F(" ") + payload);
   https.end();
 
   size_t jsonSzEstimate = payload.length() * 2;
@@ -182,8 +215,24 @@ std::unique_ptr<DynamicJsonDocument> BartDepart::fetchData() {
     DEBUG_PRINTLN(F("BartDepart::fetchData: Missing ‘root’ object"));
     return nullptr;
   }
+
+  // after-hours check
+  JsonObject msg = root["message"].as<JsonObject>();
+  if (!msg.isNull() &&
+      (msg.containsKey("warning") || msg.containsKey("error"))) {
+    DEBUG_PRINTF("BartDepart::fetchData: warning/error: (%s / %s)\n",
+                 msg["warning"] | msg["error"] | "unknown",
+                 msg["error"] | msg["warning"] | "");
+    return nullptr;
+  }
+
   String date = root["date"] | "";
   String time = root["time"] | "";
+  if (date.isEmpty() || time.isEmpty()) {
+    DEBUG_PRINTLN(String(F("BartDepart::fetchData missing response timestamp")));
+    return nullptr;
+  }
+
   String stationName = "";
   if (root["station"].is<JsonArray>()) {
     JsonArray stations = root["station"].as<JsonArray>();
