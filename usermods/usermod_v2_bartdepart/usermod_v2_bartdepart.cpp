@@ -11,7 +11,11 @@ const char CFG_UPDATE_SECS[] = "UpdateSecs";
 const char CFG_API_BASE[] = "ApiBase";
 const char CFG_API_KEY[] = "ApiKey";
 const char CFG_API_STATION[] = "ApiStation";
-const char CFG_PLATFORM_ID[] = "Platform";
+// don't use WLED seg 0, it's "special"
+const char CFG_SEG1_PLATFORM_ID[] = "Segment1Platform";
+const char CFG_SEG2_PLATFORM_ID[] = "Segment2Platform";
+const char CFG_SEG3_PLATFORM_ID[] = "Segment3Platform";
+const char CFG_SEG4_PLATFORM_ID[] = "Segment4Platform";
 
 const uint16_t SAFETY_DELAY_MSEC = 5000;
 
@@ -51,7 +55,11 @@ void BartDepart::setup() {
 
   client.setInsecure();	// don't validate certs
 
-  platforms_.emplace_back(platformId);
+  // create the platform displays
+  platforms_.emplace_back(seg1PlatformId);
+  platforms_.emplace_back(seg2PlatformId);
+  platforms_.emplace_back(seg3PlatformId);
+  platforms_.emplace_back(seg4PlatformId);
 
   startTs = millis();
 
@@ -103,9 +111,9 @@ void BartDepart::loop() {
       JsonObject top = doc->as<JsonObject>();
       JsonObject data = top["root"].as<JsonObject>();
       if (!data.isNull()) {
+        DEBUG_PRINTLN(F("")); // bogus, whoever logs "Web server status:" doesn't newline
         for (auto &platform : platforms_) {
           platform.update(data);
-          DEBUG_PRINTLN(String(F("BartDepart::loop: ")) + platform.toString());
         }
       } else {
         DEBUG_PRINTLN(F("BartDepart::loop: Missing nested 'root' object"));
@@ -128,7 +136,7 @@ void BartDepart::loop() {
 
 void BartDepart::handleOverlayDraw() {
   time_t now = ::now();
-  size_t segment = 0;
+  size_t segment = 1;  //don't use WLED seg 0, it's "special" ...
   for (auto& platform : platforms_) {
     platform.display(now, segment++);
   }
@@ -146,7 +154,10 @@ bool BartDepart::readFromConfig(JsonObject& root) {
   configComplete &= getJsonValue(top[FPSTR(CFG_API_BASE)], apiBase, apiBase);
   configComplete &= getJsonValue(top[FPSTR(CFG_API_KEY)], apiKey, apiKey);
   configComplete &= getJsonValue(top[FPSTR(CFG_API_STATION)], apiStation, apiStation);
-  configComplete &= getJsonValue(top[FPSTR(CFG_PLATFORM_ID)], platformId, platformId);
+  configComplete &= getJsonValue(top[FPSTR(CFG_SEG1_PLATFORM_ID)], seg1PlatformId, seg1PlatformId);
+  configComplete &= getJsonValue(top[FPSTR(CFG_SEG2_PLATFORM_ID)], seg2PlatformId, seg2PlatformId);
+  configComplete &= getJsonValue(top[FPSTR(CFG_SEG3_PLATFORM_ID)], seg3PlatformId, seg3PlatformId);
+  configComplete &= getJsonValue(top[FPSTR(CFG_SEG4_PLATFORM_ID)], seg4PlatformId, seg4PlatformId);
 
   return configComplete;
 }
@@ -162,10 +173,16 @@ void BartDepart::addToConfig(JsonObject& root) {
   top[FPSTR(CFG_API_BASE)] = apiBase;
   top[FPSTR(CFG_API_KEY)] = apiKey;
   top[FPSTR(CFG_API_STATION)] = apiStation;
-  top[FPSTR(CFG_PLATFORM_ID)] = platformId;
+  top[FPSTR(CFG_SEG1_PLATFORM_ID)] = seg1PlatformId;
+  top[FPSTR(CFG_SEG2_PLATFORM_ID)] = seg2PlatformId;
+  top[FPSTR(CFG_SEG3_PLATFORM_ID)] = seg3PlatformId;
+  top[FPSTR(CFG_SEG4_PLATFORM_ID)] = seg4PlatformId;
 
   platforms_.clear();
-  platforms_.emplace_back(platformId);
+  platforms_.emplace_back(seg1PlatformId);
+  platforms_.emplace_back(seg2PlatformId);
+  platforms_.emplace_back(seg3PlatformId);
+  platforms_.emplace_back(seg4PlatformId);
 
   if (enabled==false)
     // Unfreeze the main segment after disabling the module
