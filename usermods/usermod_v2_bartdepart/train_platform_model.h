@@ -34,7 +34,7 @@ public:
   String toString() const;
 
 private:
-  String platformId_;
+  String platformId_;	// disable if empty
   std::deque<ETDBatch>      history_;
 
   time_t      parseHeaderTimestamp(const char* date, const char* time) const;

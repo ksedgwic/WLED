@@ -8,6 +8,8 @@
 #include "util.h"
 
 void TrainPlatformModel::update(const JsonObject &root) {
+  if (platformId_.isEmpty()) return;
+
   ETDBatch batch;
   const char* dateStr = root["date"] | "";
   const char* timeStr = root["time"] | "";
@@ -36,10 +38,13 @@ void TrainPlatformModel::update(const JsonObject &root) {
       return a.estDep < b.estDep;
     });
 
+  // keep the most recent history
   history_.push_back(std::move(batch));
   while (history_.size() > 5) {
     history_.pop_front();
   }
+
+  DEBUG_PRINTF("BartDepart::update platform %s: %s\n", platformId_.c_str(), toString().c_str());
 }
 
 // helper to map your TrainColor enum → CRGB
@@ -56,20 +61,26 @@ static CRGB colorFromTrainColor(TrainColor tc) {
 }
 
 void TrainPlatformModel::display(time_t now, size_t segment) {
+  if (platformId_.isEmpty()) return;
   if (history_.empty()) return;
+
   const ETDBatch& batch = history_.back();
 
   // fetch segment start/stop
   auto &seg = strip.getSegment(segment);
   seg.freeze = true;
   int  start = seg.start;
-  int    end = seg.stop;    // inclusive
-  int     len = end - start + 1;
+  int    end = seg.stop - 1;    // inclusive
+  int    len = end - start + 1;
 
   // clear it
   for (int i = start; i <= end; i++) {
     strip.setPixelColor(i, 0);  // off
   }
+
+  // Is this segment flagged as "reversed"?
+  int base  = seg.reverse ? end : start;
+  int dir   = seg.reverse ? -1  : +1;
 
   // for each ETD, plot it
   for (auto &e : batch.etds) {
@@ -78,25 +89,26 @@ void TrainPlatformModel::display(time_t now, size_t segment) {
 
     int   idx  = int(floor(diffMin));        // primary LED index
     float frac = diffMin - float(idx);       // cross‐fade fraction
+    uint8_t b1 = uint8_t((1.0f - frac) * 255);
+    uint8_t b2 = uint8_t(frac * 255);
 
-    CRGB  col  = colorFromTrainColor(e.color);
+    CRGB col = colorFromTrainColor(e.color);
+
+    int pos1 = base + dir*idx;
+    int pos2 = base + dir*(idx+1);
 
     // primary LED gets (1–frac)×full brightness
-    uint8_t b1 = uint8_t((1.0f - frac) * 255);
-    strip.setPixelColor(start + idx,
-        ((uint32_t)col.r * b1 / 255) << 16 |
-        ((uint32_t)col.g * b1 / 255) <<  8 |
-        ((uint32_t)col.b * b1 / 255)
-    );
+    if (pos1 >= start && pos1 <= end) {
+      strip.setPixelColor(pos1, ((uint32_t)col.r * b1 / 255) << 16 |
+                                    ((uint32_t)col.g * b1 / 255) << 8 |
+                                    ((uint32_t)col.b * b1 / 255));
+    }
 
     // secondary LED (if in bounds) gets frac×full brightness
-    if (idx + 1 < len) {
-      uint8_t b2 = uint8_t(frac * 255);
-      strip.setPixelColor(start + idx + 1,
-        ((uint32_t)col.r * b2 / 255) << 16 |
-        ((uint32_t)col.g * b2 / 255) <<  8 |
-        ((uint32_t)col.b * b2 / 255)
-      );
+    if (pos2 >= start && pos2 <= end) {
+      strip.setPixelColor(pos2, ((uint32_t)col.r * b2 / 255) << 16 |
+                                    ((uint32_t)col.g * b2 / 255) << 8 |
+                                    ((uint32_t)col.b * b2 / 255));
     }
   }
 }
