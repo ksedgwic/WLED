@@ -42,11 +42,32 @@ private:
   String apiStation = "19th";
 #endif
 
-#ifdef BARTDEPART_DEFAULT_PLATFORM_ID
-  String platformId = BARTDEPART_DEFAULT_PLATFORM_ID;
+// NOTE - don't use the WLED segment 0, it is "special"
+
+#ifdef BARTDEPART_DEFAULT_SEG1_PLATFORM_ID
+  String seg1PlatformId = BARTDEPART_DEFAULT_SEG1_PLATFORM_ID
 #else
-  String platformId = "1";
+  String seg1PlatformId = "1";
 #endif
+
+#ifdef BARTDEPART_DEFAULT_SEG2_PLATFORM_ID
+  String seg2PlatformId = BARTDEPART_DEFAULT_SEG2_PLATFORM_ID
+#else
+  String seg2PlatformId = "";
+#endif
+
+#ifdef BARTDEPART_DEFAULT_SEG3_PLATFORM_ID
+  String seg3PlatformId = BARTDEPART_DEFAULT_SEG3_PLATFORM_ID
+#else
+  String seg3PlatformId = "";
+#endif
+
+#ifdef BARTDEPART_DEFAULT_SEG4_PLATFORM_ID
+  String seg4PlatformId = BARTDEPART_DEFAULT_SEG4_PLATFORM_ID
+#else
+  String seg4PlatformId = "";
+#endif
+
 
   // Define constants
   static const uint8_t myLockId = USERMOD_ID_BARTDEPART;   // Used for requestJSONBufferLock(id)
