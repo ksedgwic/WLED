@@ -64,6 +64,11 @@ void TrainPlatformModel::display(time_t now, size_t segment) {
   if (platformId_.isEmpty()) return;
   if (history_.empty()) return;
 
+  // phase toggle
+  static uint8_t frameCnt = 0;           // 0..99
+  bool preferFirst = frameCnt < 50;      // true for first 0.5 s
+  frameCnt = (frameCnt + 1) % 100;
+
   const ETDBatch& batch = history_.back();
 
   // fetch segment start/stop
@@ -97,18 +102,48 @@ void TrainPlatformModel::display(time_t now, size_t segment) {
     int pos1 = base + dir*idx;
     int pos2 = base + dir*(idx+1);
 
+    // When trains "overlap" (because they are sourced from two different lines) we:
+    // 1. Generally alternate, prefering the first a while and then the other.
+    // 2. Except when one is much brighter than the other, in which case prefer it.
+    //    This keeps a "sliver" of an adjacent train from interfering.
+
+    // compute “brightness” = R+G+B
+    auto brightness = [&](uint32_t c) {
+      return (uint16_t)(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF));
+    };
+
     // primary LED gets (1–frac)×full brightness
     if (pos1 >= start && pos1 <= end) {
-      strip.setPixelColor(pos1, ((uint32_t)col.r * b1 / 255) << 16 |
-                                    ((uint32_t)col.g * b1 / 255) << 8 |
-                                    ((uint32_t)col.b * b1 / 255));
+      uint32_t existing = strip.getPixelColor(pos1);
+      // build new color
+      uint32_t newColor1 =
+        (((uint32_t)col.r * b1 / 255) << 16) |
+        (((uint32_t)col.g * b1 / 255) <<  8) |
+         ((uint32_t)col.b * b1 / 255);
+
+      uint16_t oldB = brightness(existing);
+      uint16_t newB = brightness(newColor1);
+
+      if ((preferFirst && (existing == 0 || newB > 2*oldB))
+          || (!preferFirst && newB * 2 >= oldB)) {
+        strip.setPixelColor(pos1, newColor1);
+      }
     }
 
     // secondary LED (if in bounds) gets frac×full brightness
     if (pos2 >= start && pos2 <= end) {
-      strip.setPixelColor(pos2, ((uint32_t)col.r * b2 / 255) << 16 |
-                                    ((uint32_t)col.g * b2 / 255) << 8 |
-                                    ((uint32_t)col.b * b2 / 255));
+      uint32_t existing2 = strip.getPixelColor(pos2);
+      uint32_t newColor2 =
+        (((uint32_t)col.r * b2 / 255) << 16) |
+        (((uint32_t)col.g * b2 / 255) <<  8) |
+         ((uint32_t)col.b * b2 / 255);
+
+      uint16_t oldB2 = brightness(existing2);
+      uint16_t newB2 = brightness(newColor2);
+      if ((preferFirst && (existing2 == 0 || newB2 > 2*oldB2))
+          || (!preferFirst && newB2 * 2 >= oldB2)) {
+        strip.setPixelColor(pos2, newColor2);
+      }
     }
   }
 }
