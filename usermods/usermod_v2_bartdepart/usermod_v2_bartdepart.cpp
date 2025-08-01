@@ -138,7 +138,7 @@ void BartDepart::handleOverlayDraw() {
   time_t now = ::now();
   size_t segment = 1;  //don't use WLED seg 0, it's "special" ...
   for (auto& platform : platforms_) {
-    platform.display(now, segment++);
+    platform.display(now, segment++, updateSecs);
   }
 }
 

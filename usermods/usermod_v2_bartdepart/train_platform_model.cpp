@@ -60,7 +60,7 @@ static CRGB colorFromTrainColor(TrainColor tc) {
   }
 }
 
-void TrainPlatformModel::display(time_t now, size_t segment) {
+void TrainPlatformModel::display(time_t now, size_t segment, uint16_t updateSecs) {
   if (platformId_.isEmpty()) return;
   if (history_.empty()) return;
 
@@ -89,7 +89,12 @@ void TrainPlatformModel::display(time_t now, size_t segment) {
 
   // for each ETD, plot it
   for (auto &e : batch.etds) {
-    float diffMin = float(e.estDep - now) / 60.0f;
+    // We offset the display by updateSecs because when a train is
+    // held in the station (common) it's departure keeps getting
+    // delayed and we don't want it falling off the bottom of the
+    // display before we get the next update (telling us it is still
+    // there).
+    float diffMin = float(updateSecs + e.estDep - now) / 60.0f;
     if (diffMin < 0 || diffMin >= len) continue;
 
     int   idx  = int(floor(diffMin));        // primary LED index
