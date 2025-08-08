@@ -16,6 +16,7 @@ public:
 
   // IDataSourceT<SkyModel>
   std::unique_ptr<SkyModel> fetch(std::time_t now) override;
+  void reset(std::time_t now) override;
   std::string name() const override { return "OWM"; }
 
   // IConfigurable

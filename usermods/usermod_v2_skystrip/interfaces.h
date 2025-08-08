@@ -23,6 +23,9 @@ public:
   /// Fetch new data, nullptr if no new data
   virtual std::unique_ptr<ModelType> fetch(std::time_t now) = 0;
 
+  /// Force the internal schedule to fetch ASAP (e.g. after ON or re-enable)
+  virtual void reset(std::time_t now) = 0;
+
   /// Identify the source (optional)
   virtual std::string name() const = 0;
 };

@@ -4,7 +4,7 @@
 
 #include "usermod_v2_skystrip.h"
 #include "interfaces.h"
-#include "util.h"
+#include "time_util.h"
 
 #include "skymodel.h"
 #include "open_weather_map_source.h"
@@ -61,6 +61,15 @@ void SkyStrip::setup() {
 void SkyStrip::loop() {
   uint32_t now_ms = millis();
 
+  // init edge baselines once
+  if (!edgeInit_) {
+    lastOff_     = offMode;
+    lastEnabled_ = enabled_;
+    edgeInit_    = true;
+  }
+
+  time_t const now = time_util::time_now_utc();
+
   // defer a short bit after reboot
   if (state_ == SkyStripState::Setup) {
     if (now_ms < safeToStart_) {
@@ -73,10 +82,17 @@ void SkyStrip::loop() {
     }
   }
 
+  // detect OFF->ON and disabled->enabled edges
+  const bool becameOn       = (lastOff_ && !offMode);
+  const bool becameEnabled  = (!lastEnabled_ && enabled_);
+  if (becameOn || becameEnabled) {
+    resetSources(now);
+  }
+  lastOff_     = offMode;
+  lastEnabled_ = enabled_;
+
   // make sure we are enabled, on, and ready
   if (!enabled_ || offMode || strip.isUpdating()) return;
-
-  time_t now = time_now();
 
   // check the sources for updates, apply to model if found
   for (auto &source : sources_) {
@@ -89,7 +105,7 @@ void SkyStrip::loop() {
 
 void SkyStrip::handleOverlayDraw() {
     // this happens a hundred times a second
-  time_t now = time_now();
+  time_t now = time_util::time_now_utc();
   for (auto &view : views_) {
     view->view(now, *model_);
   }
@@ -156,4 +172,12 @@ void SkyStrip::doneBooting() {
   seg.freeze = true;    // stop any further segment animation
   seg.setMode(0);       // static palette/color mode
   // seg.intensity = 255;  // preserve user's settings via webapp
+}
+
+void SkyStrip::resetSources(std::time_t now) {
+  char nowBuf[20];
+  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
+  DEBUG_PRINTF("SkyStrip::ResetSources at %s\n", nowBuf);
+
+  for (auto &src : sources_) src->reset(now);
 }

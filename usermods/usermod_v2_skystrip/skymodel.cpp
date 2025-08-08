@@ -1,6 +1,9 @@
-#include "skymodel.h"
-#include "wled.h"
 #include <cassert>
+
+#include "wled.h"
+
+#include "skymodel.h"
+#include "time_util.h"
 
 SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   lcl_tstamp = other.lcl_tstamp;
@@ -8,7 +11,7 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   if (!other.temperature_forecast.empty())
     temperature_forecast.swap(other.temperature_forecast);
 
-  DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n", utcOffsetSecs, toString(now).c_str());
+  DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n", toString(now).c_str());
 
   return *this;
 }
@@ -17,27 +20,17 @@ String SkyModel::toString(time_t now) const {
   String out;
 
   // Format our local fetch timestamp
-  time_t ourTs = lcl_tstamp + utcOffsetSecs; // convert to local
-  struct tm tmNow = *localtime(&ourTs);
   char nowBuf[20];
-  snprintf(nowBuf, sizeof(nowBuf),
-           "%02d-%02d %02d:%02d", // <-- space between date and time
-           tmNow.tm_mon + 1, tmNow.tm_mday, tmNow.tm_hour,
-           tmNow.tm_min);
+  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
   out = nowBuf;
 
   out += F(": temp:");
   out += F("[");
-  char buf[20];
+  char dpBuf[20];
   for (const auto &dp : temperature_forecast) {
-    time_t tstamp = dp.tstamp + utcOffsetSecs; // convert to local
-    struct tm tmTstamp = *localtime(&tstamp);
-    snprintf(buf, sizeof(buf),
-             "%02d-%02d %02d:%02d", // <-- space between date and time
-             tmTstamp.tm_mon + 1, tmTstamp.tm_mday, tmTstamp.tm_hour,
-             tmTstamp.tm_min);
+    time_util::fmt_local(dpBuf, sizeof(dpBuf), dp.tstamp);
     out += " (";
-    out += buf;
+    out += dpBuf;
     out += ", ";
     out += String(dp.value, 2);
     out += ")";
