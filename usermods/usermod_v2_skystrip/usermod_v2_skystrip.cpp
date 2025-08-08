@@ -68,6 +68,8 @@ void SkyStrip::loop() {
     } else {
       DEBUG_PRINTLN(F("SkyStrip::loop SkyStripState is Running"));
       state_ = SkyStripState::Running;
+      doneBooting();
+      resetSources(now); // load right away
     }
   }
 

@@ -1,5 +1,9 @@
 #include "temperature_view.h"
 #include "skymodel.h"
+#include "wled.h"          // Segment, strip, RGBW32
+#include <algorithm>
+#include <cmath>
+
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 
@@ -8,13 +12,91 @@ static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 //
 const char CFG_SEG_ID[] = "SegmentId";
 
+static inline double lerp(double a, double b, double t) { return a + (b - a) * t; }
+template<typename T> static inline T clamp01(T v) {
+  return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
+}
+
+// Interpolate forecast
+static bool estimateTempAt(const SkyModel& m, time_t t, double& outF) {
+  const auto& v = m.temperature_forecast;
+  if (v.empty()) return false;
+  if (t <= v.front().tstamp) { outF = v.front().value; return true; }
+  if (t >= v.back().tstamp)  { outF = v.back().value;  return true; }
+
+  for (size_t i = 1; i < v.size(); ++i) {
+    if (t <= v[i].tstamp) {
+      const auto& a = v[i-1];
+      const auto& b = v[i];
+      const double span = double(b.tstamp - a.tstamp);
+      double u = span > 0 ? double(t - a.tstamp) / span : 0.0;
+      u = clamp01(u);
+      outF = lerp(a.value, b.value, u);        // values are °F
+      return true;
+    }
+  }
+  return false;
+}
+
+struct Stop { double f; uint8_t r,g,b; };
+// Cold→Hot ramp in °F: 14,32,50,68,77,86,95,104
+static const Stop kStopsF[] = {
+  {  14,  20,  40, 255 }, // deep blue
+  {  32,   0, 140, 255 }, // blue/cyan
+  {  50,   0, 255, 255 }, // cyan
+  {  68,   0, 255,  80 }, // greenish
+  {  77, 255, 255,   0 }, // yellow
+  {  86, 255, 165,   0 }, // orange
+  {  95, 255,  80,   0 }, // orange-red
+  { 104, 255,   0,   0 }, // red
+};
+
+static uint32_t colorForTempF(double f) {
+  if (f <= kStopsF[0].f) return RGBW32(kStopsF[0].r, kStopsF[0].g, kStopsF[0].b, 0);
+  for (size_t i = 1; i < sizeof(kStopsF)/sizeof(kStopsF[0]); ++i) {
+    if (f <= kStopsF[i].f) {
+      const auto& A = kStopsF[i-1];
+      const auto& B = kStopsF[i];
+      const double u = (f - A.f) / (B.f - A.f);
+      const uint8_t r = uint8_t(std::lround(lerp(A.r, B.r, u)));
+      const uint8_t g = uint8_t(std::lround(lerp(A.g, B.g, u)));
+      const uint8_t b = uint8_t(std::lround(lerp(A.b, B.b, u)));
+      return RGBW32(r,g,b,0);
+    }
+  }
+  const auto& Z = kStopsF[sizeof(kStopsF)/sizeof(kStopsF[0]) - 1];
+  return RGBW32(Z.r, Z.g, Z.b, 0);
+}
+
 TemperatureView::TemperatureView()
   : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: TV::CTOR");
 }
 
 void TemperatureView::view(time_t now, SkyModel const & model) {
-  // pass
+  if (segId_ == DEFAULT_SEG_ID) return;                      // disabled
+  if (model.temperature_forecast.empty()) return;            // nothing to render
+
+  if (segId_ < 0 || segId_ >= strip.getMaxSegments()) return;
+  Segment &seg = strip.getSegment((uint8_t)segId_);
+  seg.freeze = true;
+  int  start = seg.start;
+  int    end = seg.stop - 1;    // inclusive
+  int    len = end - start + 1;
+  if (len == 0) return;
+
+  constexpr double kHorizonSec = 48.0 * 3600.0;
+  const double step = (len > 1) ? (kHorizonSec / double(len - 1)) : 0.0;
+
+  for (uint16_t i = 0; i < len; ++i) {
+    const time_t t = now + time_t(std::llround(step * i));
+    double tempF;
+    if (!estimateTempAt(model, t, tempF)) continue;
+    const uint32_t col = colorForTempF(tempF);
+
+    strip.setPixelColor(start + i, col);                          // index is segment-relative
+  }
+  // WLED core will push pixels; no strip.show() here.
 }
 
 void TemperatureView::addToConfig(JsonObject& subtree) {
@@ -26,3 +108,4 @@ bool TemperatureView::readFromConfig(JsonObject& subtree) {
   configComplete &= getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
   return configComplete;
 }
+
