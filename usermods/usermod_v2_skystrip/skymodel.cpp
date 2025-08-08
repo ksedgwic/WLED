@@ -10,6 +10,8 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
 
   if (!other.temperature_forecast.empty())
     temperature_forecast.swap(other.temperature_forecast);
+  if (!other.dew_point_forecast.empty())
+    dew_point_forecast.swap(other.dew_point_forecast);
 
   DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n", toString(now).c_str());
 
@@ -24,10 +26,23 @@ String SkyModel::toString(time_t now) const {
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
   out = nowBuf;
 
+  char dpBuf[20];
+
   out += F(": temp:");
   out += F("[");
-  char dpBuf[20];
   for (const auto &dp : temperature_forecast) {
+    time_util::fmt_local(dpBuf, sizeof(dpBuf), dp.tstamp);
+    out += " (";
+    out += dpBuf;
+    out += ", ";
+    out += String(dp.value, 2);
+    out += ")";
+  }
+  out += F(" ]");
+
+  out += F(": dew_point:");
+  out += F("[");
+  for (const auto &dp : dew_point_forecast) {
     time_util::fmt_local(dpBuf, sizeof(dpBuf), dp.tstamp);
     out += " (";
     out += dpBuf;

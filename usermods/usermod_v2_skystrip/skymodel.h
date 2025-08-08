@@ -29,4 +29,5 @@ public:
 
   std::time_t lcl_tstamp{0};			// update timestamp from our clock
   std::vector<DataPoint> temperature_forecast;
+  std::vector<DataPoint> dew_point_forecast;
 };

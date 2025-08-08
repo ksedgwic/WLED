@@ -17,25 +17,79 @@ template<typename T> static inline T clamp01(T v) {
   return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
 }
 
-// Interpolate forecast
-static bool estimateTempAt(const SkyModel& m, time_t t, double& outF) {
-  const auto& v = m.temperature_forecast;
+template<class Series>
+static bool estimateAt(const Series& v, time_t t, double& out) {
   if (v.empty()) return false;
-  if (t <= v.front().tstamp) { outF = v.front().value; return true; }
-  if (t >= v.back().tstamp)  { outF = v.back().value;  return true; }
-
+  if (t <= v.front().tstamp) { out = v.front().value; return true; }
+  if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
   for (size_t i = 1; i < v.size(); ++i) {
     if (t <= v[i].tstamp) {
-      const auto& a = v[i-1];
-      const auto& b = v[i];
+      const auto& a = v[i-1]; const auto& b = v[i];
       const double span = double(b.tstamp - a.tstamp);
-      double u = span > 0 ? double(t - a.tstamp) / span : 0.0;
-      u = clamp01(u);
-      outF = lerp(a.value, b.value, u);        // values are °F
+      const double u = clamp01(span > 0 ? double(t - a.tstamp) / span : 0.0);
+      out = lerp(a.value, b.value, u);
       return true;
     }
   }
   return false;
+}
+
+static bool estimateTempAt(const SkyModel& m, time_t t, double& outF)    {
+  return estimateAt(m.temperature_forecast, t, outF);
+}
+static bool estimateDewPtAt(const SkyModel& m, time_t t, double& outFdp) {
+  return estimateAt(m.dew_point_forecast, t, outFdp);
+}
+
+// Assumes RGBW32 packs as (W<<24 | R<<16 | G<<8 | B).
+static inline uint8_t Rof(uint32_t c){ return (c >> 16) & 0xFF; }
+static inline uint8_t Gof(uint32_t c){ return (c >>  8) & 0xFF; }
+static inline uint8_t Bof(uint32_t c){ return (c      ) & 0xFF; }
+
+// Scale saturation by mixing toward luma (keeps perceived brightness stable).
+static inline uint32_t applySaturation(uint32_t col, float sat) {
+  // sat expected in [0,1]; 0=muggy/gray, 1=full color
+  if (sat < 0.f) sat = 0.f; else if (sat > 1.f) sat = 1.f;
+
+  const float r = float((col >> 16) & 0xFF);
+  const float g = float((col >>  8) & 0xFF);
+  const float b = float((col      ) & 0xFF);
+
+  // Rec.709 luma (linear-ish; good enough here)
+  const float y = 0.2627f*r + 0.6780f*g + 0.0593f*b;
+
+  auto mixc = [&](float c) {
+    float v = y + sat * (c - y);     // pull toward gray as sat↓
+    if (v < 0.f) v = 0.f;
+    if (v > 255.f) v = 255.f;
+    return v;
+  };
+
+  const uint8_t r2 = uint8_t(lrintf(mixc(r)));
+  const uint8_t g2 = uint8_t(lrintf(mixc(g)));
+  const uint8_t b2 = uint8_t(lrintf(mixc(b)));
+  return RGBW32(r2, g2, b2, 0);
+}
+
+// Apply a simple brightness scaling.
+// "val" expected in [0,1]; 1=no change, 0=black.
+static inline uint32_t applyBrightness(uint32_t col, float val) {
+  if (val < 0.f) val = 0.f; else if (val > 1.f) val = 1.f;
+  const uint8_t r = uint8_t(lrintf(float(Rof(col)) * val));
+  const uint8_t g = uint8_t(lrintf(float(Gof(col)) * val));
+  const uint8_t b = uint8_t(lrintf(float(Bof(col)) * val));
+  return RGBW32(r, g, b, 0);
+}
+
+// Map dew-point depression (°F) -> saturation multiplier.
+// dd<=2°F  -> minSat ; dd>=25°F -> 1.0 ; smooth in between.
+static inline float satFromDewSpreadF(float tempF, float dewF) {
+  float dd = tempF - dewF; if (dd < 0.f) dd = 0.f;          // guard bad inputs
+  constexpr float kMinSat    = 0.40f;                       // floor (muggy look)
+  constexpr float kMaxSpread = 25.0f;                       // “very dry” cap
+  float u = clamp01(dd / kMaxSpread);
+  float eased = u*u*(3.f - 2.f*u);                          // smoothstep
+  return kMinSat + (1.f - kMinSat) * eased;
 }
 
 struct Stop { double f; uint8_t r,g,b; };
@@ -90,13 +144,28 @@ void TemperatureView::view(time_t now, SkyModel const & model) {
 
   for (uint16_t i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
+
     double tempF;
     if (!estimateTempAt(model, t, tempF)) continue;
-    const uint32_t col = colorForTempF(tempF);
+    uint32_t col = colorForTempF(tempF);
 
-    strip.setPixelColor(start + i, col);                          // index is segment-relative
+    double dewF;
+    float sat = 1.0f;
+    if (estimateDewPtAt(model, t, dewF)) {
+      sat = satFromDewSpreadF((float)tempF, (float)dewF);
+    }
+    col = applySaturation(col, sat);
+    col = applyBrightness(col, 0.7f);
+
+    // static time_t lastDebug = 0;
+    // if (now - lastDebug > 5) {
+    //   DEBUG_PRINTF("TV: i=%u T=%.1fF D=%.1fF sat=%.2f col=%08x\n",
+    //                i, tempF, dewF, sat, (unsigned)col);
+    //   lastDebug = now;
+    // }
+
+    strip.setPixelColor(start + i, col);
   }
-  // WLED core will push pixels; no strip.show() here.
 }
 
 void TemperatureView::addToConfig(JsonObject& subtree) {

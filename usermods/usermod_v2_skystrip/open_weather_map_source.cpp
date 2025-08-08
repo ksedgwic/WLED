@@ -6,8 +6,8 @@ static constexpr const char* DEFAULT_API_BASE    =
   "?exclude=current,minutely,daily,alerts"
   "&units=imperial";
 static constexpr const char *DEFAULT_API_KEY = "";
-static constexpr const double DEFAULT_LATITUDE = 37.8044;
-static constexpr const double DEFAULT_LONGITUDE = -122.2712;
+static constexpr const double DEFAULT_LATITUDE = 37.80486;
+  static constexpr const double DEFAULT_LONGITUDE = -122.2716;
 static constexpr unsigned DEFAULT_INTERVAL_SEC = 3600;	// 1 hour
 
 // - these are user visible in the webapp settings UI
@@ -87,8 +87,8 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
   model->lcl_tstamp = now;
   for (JsonObject hour : hourly) {
     time_t dt    = hour["dt"].as<time_t>();
-    double tempK = hour["temp"].as<double>();
-    model->temperature_forecast.push_back({ dt, tempK });
+    model->temperature_forecast.push_back({ dt, hour["temp"].as<double>() });
+    model->dew_point_forecast.push_back({ dt, hour["dew_point"].as<double>() });
   }
 
   return model;
