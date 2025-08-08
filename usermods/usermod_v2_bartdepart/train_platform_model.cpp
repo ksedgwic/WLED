@@ -14,7 +14,7 @@ void TrainPlatformModel::update(const JsonObject &root) {
   const char* dateStr = root["date"] | "";
   const char* timeStr = root["time"] | "";
   batch.apiTs = parseHeaderTimestamp(dateStr, timeStr);
-  batch.ourTs = now();
+  batch.ourTs = time_now();
 
   if (root["station"].is<JsonArray>()) {
     for (JsonObject station : root["station"].as<JsonArray>()) {
