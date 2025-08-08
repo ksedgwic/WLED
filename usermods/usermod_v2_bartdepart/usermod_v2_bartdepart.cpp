@@ -91,7 +91,7 @@ void BartDepart::loop() {
     prevOffMode  = offMode;
   }
 
-  time_t nowSec = now();
+  time_t nowSec = time_now();
   if (nowSec == 0 || nowSec < nextFetchSec) return;
 
   // record that we *are* attempting now
@@ -135,7 +135,7 @@ void BartDepart::loop() {
 
 
 void BartDepart::handleOverlayDraw() {
-  time_t now = ::now();
+  time_t now = ::time_now();
   size_t segment = 1;  //don't use WLED seg 0, it's "special" ...
   for (auto& platform : platforms_) {
     platform.display(now, segment++, updateSecs);
