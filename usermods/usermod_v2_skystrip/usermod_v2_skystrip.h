@@ -20,6 +20,9 @@ private:
   SkyStripState state_ = SkyStripState::Initial;
   uint32_t safeToStart_ = 0;
   uint32_t lastLoop_ = 0;
+  bool edgeInit_ = false;
+  bool lastOff_ = false;
+  bool lastEnabled_ = false;
 
   std::vector<std::unique_ptr<IDataSourceT<SkyModel>>> sources_;
   std::unique_ptr<SkyModel> model_;
@@ -42,4 +45,5 @@ public:
 protected:
   void showBooting();
   void doneBooting();
+  void resetSources(std::time_t now);
 };

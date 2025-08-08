@@ -93,3 +93,13 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
 
   return model;
 }
+
+void OpenWeatherMapSource::reset(std::time_t now) {
+  const std::time_t iv = static_cast<std::time_t>(intervalSec_);
+  // Force next fetch to be eligible immediately
+  lastFetch_ = (now >= iv) ? (now - iv) : 0;
+
+  // If you later add backoff/jitter, clear it here too.
+  // backoffExp_ = 0; nextRetryAt_ = 0;
+  DEBUG_PRINTF("SkyStrip: %s::reset (interval=%u)\n", name().c_str(), intervalSec_);
+}
