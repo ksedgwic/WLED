@@ -12,6 +12,12 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
     temperature_forecast.swap(other.temperature_forecast);
   if (!other.dew_point_forecast.empty())
     dew_point_forecast.swap(other.dew_point_forecast);
+  if (!other.wind_speed_forecast.empty())
+    wind_speed_forecast.swap(other.wind_speed_forecast);
+  if (!other.wind_dir_forecast.empty())
+    wind_dir_forecast.swap(other.wind_dir_forecast);
+  if (!other.wind_gust_forecast.empty())
+    wind_gust_forecast.swap(other.wind_gust_forecast);
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
@@ -47,5 +53,8 @@ String SkyModel::toString(time_t now) const {
   String out;
   appendSeriesMDHM(out, now, F(" temp"), temperature_forecast);
   appendSeriesMDHM(out, now, F(" dwpt"), dew_point_forecast);
+  appendSeriesMDHM(out, now, F(" wspd"), wind_speed_forecast);
+  appendSeriesMDHM(out, now, F(" wdir"), wind_dir_forecast);
+  appendSeriesMDHM(out, now, F(" wgst"), wind_gust_forecast);
   return out;
 }

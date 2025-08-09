@@ -9,6 +9,7 @@
 #include "skymodel.h"
 #include "open_weather_map_source.h"
 #include "temperature_view.h"
+#include "wind_view.h"
 
 const char CFG_NAME[] = "SkyStrip";
 const char CFG_ENABLED[] = "Enabled";
@@ -28,6 +29,7 @@ SkyStrip::SkyStrip() {
   sources_.push_back(::make_unique<OpenWeatherMapSource>());
   model_ = ::make_unique<SkyModel>();
   views_.push_back(::make_unique<TemperatureView>());
+  views_.push_back(::make_unique<WindView>());
 }
 
 void SkyStrip::setup() {

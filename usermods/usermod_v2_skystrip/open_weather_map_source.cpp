@@ -108,6 +108,9 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
     time_t dt    = hour["dt"].as<time_t>();
     model->temperature_forecast.push_back({ dt, hour["temp"].as<double>() });
     model->dew_point_forecast.push_back({ dt, hour["dew_point"].as<double>() });
+    model->wind_speed_forecast.push_back({ dt, hour["wind_speed"].as<double>() });
+    model->wind_dir_forecast.push_back({ dt, hour["wind_deg"].as<double>() });
+    model->wind_gust_forecast.push_back({ dt, hour["wind_gust"].as<double>() });
   }
 
   return model;
