@@ -138,24 +138,29 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
 
   bool ok = true;
 
+  // It is not safe to make API calls during startup
+  bool  startup_complete = state_ == SkyStripState::Running;
+
   // read our state
   ok &= getJsonValue(top[FPSTR(CFG_ENABLED)], enabled_, false);
 
   // read the sources
   for (auto& src : sources_) {
     JsonObject sub = top[src->configKey()];
-    ok &= src->readFromConfig(sub);
+    ok &= src->readFromConfig(sub, startup_complete);
   }
 
   // read the views
   for (auto& vw : views_) {
     JsonObject sub = top[vw->configKey()];
-    ok &= vw->readFromConfig(sub);
+    ok &= vw->readFromConfig(sub, startup_complete);
   }
 
-  // load from API right away
-  time_t const now = time_util::time_now_utc();
-  resetSources(now);
+    // if safe (we are running) load from API right away
+  if (startup_complete) {
+    time_t const now = time_util::time_now_utc();
+    resetSources(now);
+  }
 
   return ok;
 }

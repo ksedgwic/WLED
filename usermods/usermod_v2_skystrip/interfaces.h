@@ -9,7 +9,7 @@
 struct IConfigurable {
   virtual ~IConfigurable() = default;
   virtual void addToConfig(JsonObject& root) = 0;
-  virtual bool readFromConfig(JsonObject& root) = 0;
+  virtual bool readFromConfig(JsonObject& root, bool startup_complete) = 0;
   virtual const char* configKey() const = 0;
 };
 

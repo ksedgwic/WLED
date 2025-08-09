@@ -21,16 +21,19 @@ public:
 
   // IConfigurable
   void addToConfig(JsonObject& subtree) override;
-  bool readFromConfig(JsonObject& subtree) override;
+  bool readFromConfig(JsonObject& subtree, bool startup_complete) override;
   const char* configKey() const override { return "OpenWeatherMap"; }
 
   String composeApiUrl();
+  bool geocodeOWM(std::string const& rawQuery, double& lat, double& lon, int* outMatches = nullptr);
 
 private:
   std::string apiBase_;
   std::string apiKey_;
+  std::string location_;
   double latitude_;
   double longitude_;
   unsigned int intervalSec_;
   std::time_t lastFetch_;
+  std::string lastLocation_;
 };
