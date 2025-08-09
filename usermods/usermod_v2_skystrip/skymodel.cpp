@@ -18,6 +18,14 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
     wind_dir_forecast.swap(other.wind_dir_forecast);
   if (!other.wind_gust_forecast.empty())
     wind_gust_forecast.swap(other.wind_gust_forecast);
+  if (!other.cloud_cover_forecast.empty())
+    cloud_cover_forecast.swap(other.cloud_cover_forecast);
+  if (!other.daylight_forecast.empty())
+    daylight_forecast.swap(other.daylight_forecast);
+  if (!other.precip_prob_forecast.empty())
+    precip_prob_forecast.swap(other.precip_prob_forecast);
+  if (!other.precip_type_forecast.empty())
+    precip_type_forecast.swap(other.precip_type_forecast);
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
@@ -54,7 +62,11 @@ String SkyModel::toString(time_t now) const {
   appendSeriesMDHM(out, now, F(" temp"), temperature_forecast);
   appendSeriesMDHM(out, now, F(" dwpt"), dew_point_forecast);
   appendSeriesMDHM(out, now, F(" wspd"), wind_speed_forecast);
-  appendSeriesMDHM(out, now, F(" wdir"), wind_dir_forecast);
   appendSeriesMDHM(out, now, F(" wgst"), wind_gust_forecast);
+  appendSeriesMDHM(out, now, F(" wdir"), wind_dir_forecast);
+  appendSeriesMDHM(out, now, F(" day"), daylight_forecast);
+  appendSeriesMDHM(out, now, F(" clds"), cloud_cover_forecast);
+  appendSeriesMDHM(out, now, F(" prcp"), precip_type_forecast);
+  appendSeriesMDHM(out, now, F(" pop"), precip_prob_forecast);
   return out;
 }

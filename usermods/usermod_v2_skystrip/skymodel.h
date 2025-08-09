@@ -34,4 +34,8 @@ public:
   std::vector<DataPoint> wind_speed_forecast;
   std::vector<DataPoint> wind_dir_forecast;
   std::vector<DataPoint> wind_gust_forecast;
+  std::vector<DataPoint> cloud_cover_forecast;
+  std::vector<DataPoint> daylight_forecast;      // 1=day, 0=night
+  std::vector<DataPoint> precip_prob_forecast;   // 0..1 probability of precip
+  std::vector<DataPoint> precip_type_forecast;   // 0 none, 1 rain, 2 snow, 3 mixed
 };
