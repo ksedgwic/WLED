@@ -2,6 +2,7 @@
 
 #include <ctime>
 #include <memory>
+#include <vector>
 
 #include "interfaces.h"
 
@@ -30,4 +31,7 @@ public:
   std::time_t lcl_tstamp{0};			// update timestamp from our clock
   std::vector<DataPoint> temperature_forecast;
   std::vector<DataPoint> dew_point_forecast;
+  std::vector<DataPoint> wind_speed_forecast;
+  std::vector<DataPoint> wind_dir_forecast;
+  std::vector<DataPoint> wind_gust_forecast;
 };
