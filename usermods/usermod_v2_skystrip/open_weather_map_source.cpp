@@ -111,6 +111,36 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
     model->wind_speed_forecast.push_back({ dt, hour["wind_speed"].as<double>() });
     model->wind_dir_forecast.push_back({ dt, hour["wind_deg"].as<double>() });
     model->wind_gust_forecast.push_back({ dt, hour["wind_gust"].as<double>() });
+    model->cloud_cover_forecast.push_back({ dt, hour["clouds"].as<double>() });
+
+    bool daytime = true;
+    JsonArray wArr = hour["weather"].as<JsonArray>();
+    if (!wArr.isNull() && wArr.size() > 0) {
+      String icon = wArr[0]["icon"] | String("");
+      if (icon.endsWith("n")) daytime = false;
+    }
+    model->daylight_forecast.push_back({ dt, daytime ? 1.0 : 0.0 });
+
+    bool hasRain = false, hasSnow = false;
+    if (hour.containsKey("rain")) {
+      double v = hour["rain"]["1h"] | 0.0;
+      if (v > 0.0) hasRain = true;
+    }
+    if (hour.containsKey("snow")) {
+      double v = hour["snow"]["1h"] | 0.0;
+      if (v > 0.0) hasSnow = true;
+    }
+    if (!hasRain && !hasSnow && !wArr.isNull() && wArr.size() > 0) {
+      String main = wArr[0]["main"] | String("");
+      main.toLowerCase();
+      if (main == F("rain") || main == F("drizzle") || main == F("thunderstorm"))
+        hasRain = true;
+      else if (main == F("snow"))
+        hasSnow = true;
+    }
+    int ptype = hasRain && hasSnow ? 3 : (hasSnow ? 2 : (hasRain ? 1 : 0));
+    model->precip_type_forecast.push_back({ dt, double(ptype) });
+    model->precip_prob_forecast.push_back({ dt, hour["pop"].as<double>() });
   }
 
   return model;
