@@ -13,44 +13,39 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   if (!other.dew_point_forecast.empty())
     dew_point_forecast.swap(other.dew_point_forecast);
 
-  DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n", toString(now).c_str());
+  char nowBuf[20];
+  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
+  DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n%s", nowBuf, toString(now).c_str());
 
   return *this;
 }
 
+template <class Series>
+static inline void appendSeriesMDHM(String &out, time_t now,
+                                    const __FlashStringHelper *label,
+                                    const Series &s) {
+  out += F("SkyModel: ");
+  out += label;
+  out += F("(");
+  out += String(s.size());
+  out += F("):[");
+
+  char tb[20];
+  for (const auto& dp : s) {
+    time_util::fmt_local(tb, sizeof(tb), dp.tstamp);
+    out += F(" (");
+    out += tb;
+    out += F(", ");
+    out += String(dp.value, 2);
+    out += F(")");
+  }
+  out += F(" ]\n");
+}
+
+
 String SkyModel::toString(time_t now) const {
   String out;
-
-  // Format our local fetch timestamp
-  char nowBuf[20];
-  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
-  out = nowBuf;
-
-  char dpBuf[20];
-
-  out += F(": temp:");
-  out += F("[");
-  for (const auto &dp : temperature_forecast) {
-    time_util::fmt_local(dpBuf, sizeof(dpBuf), dp.tstamp);
-    out += " (";
-    out += dpBuf;
-    out += ", ";
-    out += String(dp.value, 2);
-    out += ")";
-  }
-  out += F(" ]");
-
-  out += F(": dew_point:");
-  out += F("[");
-  for (const auto &dp : dew_point_forecast) {
-    time_util::fmt_local(dpBuf, sizeof(dpBuf), dp.tstamp);
-    out += " (";
-    out += dpBuf;
-    out += ", ";
-    out += String(dp.value, 2);
-    out += ")";
-  }
-  out += F(" ]");
-
+  appendSeriesMDHM(out, now, F(" temp"), temperature_forecast);
+  appendSeriesMDHM(out, now, F(" dwpt"), dew_point_forecast);
   return out;
 }

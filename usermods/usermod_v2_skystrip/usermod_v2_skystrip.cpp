@@ -153,6 +153,10 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
     ok &= vw->readFromConfig(sub);
   }
 
+  // load from API right away
+  time_t const now = time_util::time_now_utc();
+  resetSources(now);
+
   return ok;
 }
 
