@@ -42,10 +42,10 @@ RestJsonClient::getJson(String const &url) {
 
   // Allocate a document with twice the payload size for safety
   auto doc = ::make_unique<DynamicJsonDocument>(payload.length() * 2);
+  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: free heap before deserialization: %u\n", ESP.getFreeHeap());
   auto err = deserializeJson(*doc, payload);
   if (err) {
-    DEBUG_PRINTLN(String(F("SkyStrip: RestJsonClient::getJson: deserialization error: "))
-                  + err.c_str());
+    DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: deserialization error: %s; free heap: %u\n", err.c_str(), ESP.getFreeHeap());
     return nullptr;
   }
   return doc;
