@@ -36,14 +36,13 @@ RestJsonClient::getJson(String const &url) {
     DEBUG_PRINTLN(String(F("SkyStrip: RestJsonClient::getJson: https get error code: ")) + code);
     return nullptr;
   }
-  String payload = https.getString();
-  https.end();
-  // DEBUG_PRINTLN(String(F("SkyStrip: RestJsonClient::getJson: saw ")) + payload);
 
-  // Allocate a document with twice the payload size for safety
-  auto doc = ::make_unique<DynamicJsonDocument>(payload.length() * 2);
-  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: free heap before deserialization: %u\n", ESP.getFreeHeap());
-  auto err = deserializeJson(*doc, payload);
+  int len = https.getSize();
+  size_t capacity = (len > 0 ? len : 1024) * 2;  // fallback if size is unknown
+  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: allocating %u bytes, free heap before deserialization: %u\n", capacity, ESP.getFreeHeap());
+  auto doc = ::make_unique<DynamicJsonDocument>(capacity);
+  auto err = deserializeJson(*doc, https.getStream());
+  https.end();
   if (err) {
     DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: deserialization error: %s; free heap: %u\n", err.c_str(), ESP.getFreeHeap());
     return nullptr;
