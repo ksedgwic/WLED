@@ -1,31 +1,48 @@
 #include <cassert>
+#include <limits>
 
 #include "wled.h"
 
 #include "skymodel.h"
 #include "time_util.h"
 
+namespace {
+static constexpr time_t HISTORY_SEC = 24 * 60 * 60;
+
+template <class Series>
+void mergeSeries(Series &current, Series &&fresh, time_t now) {
+  Series merged = std::move(fresh);
+  time_t earliest_new = merged.empty()
+                          ? std::numeric_limits<time_t>::max()
+                          : merged.front().tstamp;
+
+  Series older;
+  for (const auto &dp : current) {
+    if (dp.tstamp < earliest_new) older.push_back(dp);
+    else break;
+  }
+  merged.insert(merged.begin(), older.begin(), older.end());
+
+  time_t cutoff = now - HISTORY_SEC;
+  while (!merged.empty() && merged.front().tstamp < cutoff) {
+    merged.pop_front();
+  }
+  current = std::move(merged);
+}
+} // namespace
+
 SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   lcl_tstamp = other.lcl_tstamp;
 
-  if (!other.temperature_forecast.empty())
-    temperature_forecast.swap(other.temperature_forecast);
-  if (!other.dew_point_forecast.empty())
-    dew_point_forecast.swap(other.dew_point_forecast);
-  if (!other.wind_speed_forecast.empty())
-    wind_speed_forecast.swap(other.wind_speed_forecast);
-  if (!other.wind_dir_forecast.empty())
-    wind_dir_forecast.swap(other.wind_dir_forecast);
-  if (!other.wind_gust_forecast.empty())
-    wind_gust_forecast.swap(other.wind_gust_forecast);
-  if (!other.cloud_cover_forecast.empty())
-    cloud_cover_forecast.swap(other.cloud_cover_forecast);
-  if (!other.daylight_forecast.empty())
-    daylight_forecast.swap(other.daylight_forecast);
-  if (!other.precip_prob_forecast.empty())
-    precip_prob_forecast.swap(other.precip_prob_forecast);
-  if (!other.precip_type_forecast.empty())
-    precip_type_forecast.swap(other.precip_type_forecast);
+  mergeSeries(temperature_forecast, std::move(other.temperature_forecast), now);
+  mergeSeries(dew_point_forecast, std::move(other.dew_point_forecast), now);
+  mergeSeries(wind_speed_forecast, std::move(other.wind_speed_forecast), now);
+  mergeSeries(wind_dir_forecast, std::move(other.wind_dir_forecast), now);
+  mergeSeries(wind_gust_forecast, std::move(other.wind_gust_forecast), now);
+  mergeSeries(cloud_cover_forecast, std::move(other.cloud_cover_forecast), now);
+  mergeSeries(daylight_forecast, std::move(other.daylight_forecast), now);
+  mergeSeries(precip_prob_forecast, std::move(other.precip_prob_forecast), now);
+  mergeSeries(precip_type_forecast, std::move(other.precip_type_forecast), now);
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
