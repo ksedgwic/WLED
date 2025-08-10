@@ -59,18 +59,33 @@ static inline void appendSeriesMDHM(String &out, time_t now,
   out += label;
   out += F("(");
   out += String(s.size());
-  out += F("):[");
+  out += F("):[\n");
+
+  if (s.empty()) {
+    out += F("SkyModel: ]\n");
+    return;
+  }
 
   char tb[20];
+  char valbuf[16];
+  size_t i = 0;
   for (const auto& dp : s) {
+    if (i % 6 == 0) {
+      out += F("SkyModel: ");
+    }
     time_util::fmt_local(tb, sizeof(tb), dp.tstamp);
+    snprintf(valbuf, sizeof(valbuf), "%6.2f", dp.value);
     out += F(" (");
     out += tb;
     out += F(", ");
-    out += String(dp.value, 2);
+    out += valbuf;
     out += F(")");
+    if (i % 6 == 5 || i == s.size() - 1) {
+      if (i == s.size() - 1) out += F(" ]\n");
+      else out += F("\n");
+    }
+    ++i;
   }
-  out += F(" ]\n");
 }
 
 
