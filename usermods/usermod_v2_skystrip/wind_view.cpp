@@ -110,7 +110,8 @@ void WindView::view(time_t now, SkyModel const & model) {
     float sat = satFromGustDiff((float)spd, (float)gst);
     float val = clamp01(float(std::max(spd, gst)) / 50.f);
     uint32_t col = hsv2rgb(hue, sat, val);
-    strip.setPixelColor(start + i, col);
+    int idx = seg.reverse ? (end - i) : (start + i);
+    strip.setPixelColor(idx, col);
   }
 }
 

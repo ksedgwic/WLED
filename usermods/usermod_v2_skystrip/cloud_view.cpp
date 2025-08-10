@@ -94,7 +94,8 @@ void CloudView::view(time_t now, SkyModel const & model) {
       col = color_blend(col, pcol, blend);
     }
 
-    strip.setPixelColor(start + i, col);
+    int idx = seg.reverse ? (end - i) : (start + i);
+    strip.setPixelColor(idx, col);
   }
 }
 
