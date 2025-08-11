@@ -16,7 +16,9 @@ public:
 
   // IConfigurable
   void addToConfig(JsonObject& subtree) override;
-  bool readFromConfig(JsonObject& subtree, bool startup_complete) override;
+  bool readFromConfig(JsonObject& subtree,
+                      bool startup_complete,
+                      bool& invalidate_history) override;
   const char* configKey() const override { return "TemperatureView"; }
 
 private:

@@ -45,5 +45,5 @@ public:
 protected:
   void showBooting();
   void doneBooting();
-  void resetSources(std::time_t now);
+  void reloadSources(std::time_t now);
 };

@@ -42,7 +42,13 @@ void OpenWeatherMapSource::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_INTERVAL_SEC)] = intervalSec_;
 }
 
-bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree, bool running) {
+bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
+                                          bool running,
+                                          bool& invalidate_history) {
+  // note what the prior values of latitude_ and longitude_ are
+  double oldLatitude = latitude_;
+  double oldLongitude = longitude_;
+
   bool configComplete = !subtree.isNull();
   configComplete &= getJsonValue(subtree[FPSTR(CFG_API_BASE)], apiBase_, DEFAULT_API_BASE);
   configComplete &= getJsonValue(subtree[FPSTR(CFG_API_KEY)], apiKey_, DEFAULT_API_KEY);
@@ -64,6 +70,11 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree, bool running) {
       }
     }
   }
+
+  // if the lat/long changed we need to invalidate_history
+  if (latitude_ != oldLatitude || longitude_ != oldLongitude)
+    invalidate_history = true;
+
   return configComplete;
 }
 
@@ -146,14 +157,14 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
   return model;
 }
 
-void OpenWeatherMapSource::reset(std::time_t now) {
+void OpenWeatherMapSource::reload(std::time_t now) {
   const std::time_t iv = static_cast<std::time_t>(intervalSec_);
   // Force next fetch to be eligible immediately
   lastFetch_ = (now >= iv) ? (now - iv) : 0;
 
   // If you later add backoff/jitter, clear it here too.
   // backoffExp_ = 0; nextRetryAt_ = 0;
-  DEBUG_PRINTF("SkyStrip: %s::reset (interval=%u)\n", name().c_str(), intervalSec_);
+  DEBUG_PRINTF("SkyStrip: %s::reload (interval=%u)\n", name().c_str(), intervalSec_);
 }
 
 // keep commas; encode spaces etc.

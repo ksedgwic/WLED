@@ -119,7 +119,9 @@ void WindView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
-bool WindView::readFromConfig(JsonObject& subtree, bool startup_complete) {
+bool WindView::readFromConfig(JsonObject& subtree,
+                              bool startup_complete,
+                              bool& invalidate_history) {
   bool configComplete = !subtree.isNull();
   configComplete &= getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
   return configComplete;

@@ -37,18 +37,30 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   mergeSeries(temperature_forecast, std::move(other.temperature_forecast), now);
   mergeSeries(dew_point_forecast, std::move(other.dew_point_forecast), now);
   mergeSeries(wind_speed_forecast, std::move(other.wind_speed_forecast), now);
-  mergeSeries(wind_dir_forecast, std::move(other.wind_dir_forecast), now);
   mergeSeries(wind_gust_forecast, std::move(other.wind_gust_forecast), now);
-  mergeSeries(cloud_cover_forecast, std::move(other.cloud_cover_forecast), now);
+  mergeSeries(wind_dir_forecast, std::move(other.wind_dir_forecast), now);
   mergeSeries(daylight_forecast, std::move(other.daylight_forecast), now);
-  mergeSeries(precip_prob_forecast, std::move(other.precip_prob_forecast), now);
+  mergeSeries(cloud_cover_forecast, std::move(other.cloud_cover_forecast), now);
   mergeSeries(precip_type_forecast, std::move(other.precip_type_forecast), now);
+  mergeSeries(precip_prob_forecast, std::move(other.precip_prob_forecast), now);
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
   DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n%s", nowBuf, toString(now).c_str());
 
   return *this;
+}
+
+void SkyModel::invalidate_history(time_t now) {
+  temperature_forecast.clear();
+  dew_point_forecast.clear();
+  wind_speed_forecast.clear();
+  wind_gust_forecast.clear();
+  wind_dir_forecast.clear();
+  daylight_forecast.clear();
+  cloud_cover_forecast.clear();
+  precip_type_forecast.clear();
+  precip_prob_forecast.clear();
 }
 
 template <class Series>
