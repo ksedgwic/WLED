@@ -60,7 +60,12 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
   // If we are safely past the boot/startup phase we can make API
   // calls to update lat/long ...
   if (running) {
-    if (location_ != lastLocation_) {
+    if (location_ == lastLocation_) {
+      // if the user changed the lat and long directly clear the location
+      if (latitude_ != oldLatitude || longitude_ != oldLongitude)
+        location_ = "";
+    } else {
+      // the user changed the location ... look it up
       lastLocation_ = location_;
       if (location_.length() > 0) {
         double lat=0, lon=0; int matches=0;
