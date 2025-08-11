@@ -173,7 +173,9 @@ void TemperatureView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
-bool TemperatureView::readFromConfig(JsonObject& subtree, bool startup_complete) {
+bool TemperatureView::readFromConfig(JsonObject& subtree,
+                                     bool startup_complete,
+                                     bool& invalidate_history) {
   bool configComplete = !subtree.isNull();
   configComplete &= getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
   return configComplete;

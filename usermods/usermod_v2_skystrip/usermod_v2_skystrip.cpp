@@ -84,7 +84,7 @@ void SkyStrip::loop() {
       DEBUG_PRINTLN(F("SkyStrip::loop SkyStripState is Running"));
       state_ = SkyStripState::Running;
       doneBooting();
-      resetSources(now); // load right away
+      reloadSources(now); // load right away
     }
   }
 
@@ -92,7 +92,7 @@ void SkyStrip::loop() {
   const bool becameOn       = (lastOff_ && !offMode);
   const bool becameEnabled  = (!lastEnabled_ && enabled_);
   if (becameOn || becameEnabled) {
-    resetSources(now);
+    reloadSources(now);
   }
   lastOff_     = offMode;
   lastEnabled_ = enabled_;
@@ -143,6 +143,7 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
   if (top.isNull()) return false;
 
   bool ok = true;
+  bool invalidate_history = false;
 
   // It is not safe to make API calls during startup
   bool  startup_complete = state_ == SkyStripState::Running;
@@ -153,19 +154,19 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
   // read the sources
   for (auto& src : sources_) {
     JsonObject sub = top[src->configKey()];
-    ok &= src->readFromConfig(sub, startup_complete);
+    ok &= src->readFromConfig(sub, startup_complete, invalidate_history);
   }
 
   // read the views
   for (auto& vw : views_) {
     JsonObject sub = top[vw->configKey()];
-    ok &= vw->readFromConfig(sub, startup_complete);
+    ok &= vw->readFromConfig(sub, startup_complete, invalidate_history);
   }
 
-    // if safe (we are running) load from API right away
-  if (startup_complete) {
+  if (invalidate_history) {
     time_t const now = time_util::time_now_utc();
-    resetSources(now);
+    model_->invalidate_history(now);
+    if (startup_complete) reloadSources(now); // not safe during startup
   }
 
   return ok;
@@ -189,10 +190,10 @@ void SkyStrip::doneBooting() {
   // seg.intensity = 255;  // preserve user's settings via webapp
 }
 
-void SkyStrip::resetSources(std::time_t now) {
+void SkyStrip::reloadSources(std::time_t now) {
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
-  DEBUG_PRINTF("SkyStrip::ResetSources at %s\n", nowBuf);
+  DEBUG_PRINTF("SkyStrip::ReloadSources at %s\n", nowBuf);
 
-  for (auto &src : sources_) src->reset(now);
+  for (auto &src : sources_) src->reload(now);
 }

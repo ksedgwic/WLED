@@ -16,12 +16,14 @@ public:
 
   // IDataSourceT<SkyModel>
   std::unique_ptr<SkyModel> fetch(std::time_t now) override;
-  void reset(std::time_t now) override;
+  void reload(std::time_t now) override;
   std::string name() const override { return "OWM"; }
 
   // IConfigurable
   void addToConfig(JsonObject& subtree) override;
-  bool readFromConfig(JsonObject& subtree, bool startup_complete) override;
+  bool readFromConfig(JsonObject& subtree,
+                      bool startup_complete,
+                      bool& invalidate_history) override;
   const char* configKey() const override { return "OpenWeatherMap"; }
 
   String composeApiUrl();

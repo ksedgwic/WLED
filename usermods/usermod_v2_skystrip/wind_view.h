@@ -14,7 +14,9 @@ public:
   std::string name() const override { return "WV"; }
 
   void addToConfig(JsonObject& subtree) override;
-  bool readFromConfig(JsonObject& subtree, bool startup_complete) override;
+  bool readFromConfig(JsonObject& subtree,
+                      bool startup_complete,
+                      bool& invalidate_history) override;
   const char* configKey() const override { return "WindView"; }
 
 private:
