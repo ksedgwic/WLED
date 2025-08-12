@@ -34,8 +34,11 @@ public:
   std::deque<DataPoint> wind_speed_forecast;
   std::deque<DataPoint> wind_gust_forecast;
   std::deque<DataPoint> wind_dir_forecast;
-  std::deque<DataPoint> daylight_forecast;      // 1=day, 0=night
   std::deque<DataPoint> cloud_cover_forecast;
   std::deque<DataPoint> precip_type_forecast;   // 0 none, 1 rain, 2 snow, 3 mixed
   std::deque<DataPoint> precip_prob_forecast;   // 0..1 probability of precip
+
+  // sunrise/sunset times from current data
+  time_t sunrise_{0};
+  time_t sunset_{0};
 };

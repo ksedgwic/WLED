@@ -1,9 +1,10 @@
 #include "open_weather_map_source.h"
 #include "skymodel.h"
+#include <limits>
 
 static constexpr const char* DEFAULT_API_BASE    =
   "https://api.openweathermap.org/data/3.0/onecall"
-  "?exclude=current,minutely,daily,alerts"
+  "?exclude=minutely,daily,alerts"
   "&units=imperial";
 static constexpr const char * DEFAULT_API_KEY = "";
 static constexpr const char * DEFAULT_LOCATION = "";
@@ -116,10 +117,37 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
     DEBUG_PRINTF("SkyStrip: %s::fetch failed: no \"hourly\" field\n", name().c_str());
     return nullptr;
   }
+
+  time_t sunrise = 0;
+  time_t sunset = 0;
+  if (root.containsKey("current")) {
+    JsonObject cur = root["current"].as<JsonObject>();
+    if (cur.containsKey("sunrise") && cur.containsKey("sunset")) {
+      sunrise = cur["sunrise"].as<time_t>();
+      sunset  = cur["sunset"].as<time_t>();
+    } else {
+      bool night = false;
+      JsonArray wArrCur = cur["weather"].as<JsonArray>();
+      if (!wArrCur.isNull() && wArrCur.size() > 0) {
+        String icon = wArrCur[0]["icon"] | String("");
+        if (icon.endsWith("n")) night = true;
+      }
+      if (night) {
+        sunrise = std::numeric_limits<time_t>::max();
+        sunset = 0;
+      } else {
+        sunrise = 0;
+        sunset = std::numeric_limits<time_t>::max();
+      }
+    }
+  }
+
   // Iterate the hourly array
   JsonArray hourly = root["hourly"].as<JsonArray>();
   auto model = ::make_unique<SkyModel>();
   model->lcl_tstamp = now;
+  model->sunrise_ = sunrise;
+  model->sunset_ = sunset;
   for (JsonObject hour : hourly) {
     time_t dt    = hour["dt"].as<time_t>();
     model->temperature_forecast.push_back({ dt, hour["temp"].as<double>() });
@@ -128,15 +156,7 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
     model->wind_dir_forecast.push_back({ dt, hour["wind_deg"].as<double>() });
     model->wind_gust_forecast.push_back({ dt, hour["wind_gust"].as<double>() });
     model->cloud_cover_forecast.push_back({ dt, hour["clouds"].as<double>() });
-
-    bool daytime = true;
     JsonArray wArr = hour["weather"].as<JsonArray>();
-    if (!wArr.isNull() && wArr.size() > 0) {
-      String icon = wArr[0]["icon"] | String("");
-      if (icon.endsWith("n")) daytime = false;
-    }
-    model->daylight_forecast.push_back({ dt, daytime ? 1.0 : 0.0 });
-
     bool hasRain = false, hasSnow = false;
     if (hour.containsKey("rain")) {
       double v = hour["rain"]["1h"] | 0.0;
