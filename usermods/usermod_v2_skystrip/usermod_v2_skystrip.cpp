@@ -106,6 +106,9 @@ void SkyStrip::loop() {
       // this happens relatively infrequently, once an hour
       model_->update(now, std::move(*frmsrc));
     }
+    if (auto hist = source->checkhistory(now, model_->oldest())) {
+      model_->update(now, std::move(*hist));
+    }
   }
 }
 

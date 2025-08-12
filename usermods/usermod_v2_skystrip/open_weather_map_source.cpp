@@ -1,6 +1,8 @@
+#include <limits>
+
 #include "open_weather_map_source.h"
 #include "skymodel.h"
-#include <limits>
+#include "time_util.h"
 
 static constexpr const char* DEFAULT_API_BASE    =
   "https://api.openweathermap.org/data/3.0/onecall"
@@ -29,7 +31,8 @@ OpenWeatherMapSource::OpenWeatherMapSource()
     , latitude_(DEFAULT_LATITUDE)
     , longitude_(DEFAULT_LONGITUDE)
     , intervalSec_(DEFAULT_INTERVAL_SEC)
-    , lastFetch_(0) {
+    , lastFetch_(0)
+    , lastHistFetch_(0) {
   DEBUG_PRINTF("SkyStrip: %s::CTOR\n", name().c_str());
 
 }
@@ -179,6 +182,76 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
     model->precip_prob_forecast.push_back({ dt, hour["pop"].as<double>() });
   }
 
+  return model;
+}
+
+std::unique_ptr<SkyModel> OpenWeatherMapSource::checkhistory(time_t now, std::time_t oldestTstamp) {
+  if (oldestTstamp == 0) return nullptr;
+  if ((now - lastHistFetch_) < 60) return nullptr;
+  lastHistFetch_ = now;
+
+  static constexpr time_t HISTORY_SEC = 24 * 60 * 60;
+  if (oldestTstamp <= now - HISTORY_SEC) return nullptr;
+
+  time_t fetchDt = oldestTstamp - 3600;
+  char buf[256];
+  snprintf(buf, sizeof(buf),
+           "https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=%.6f&lon=%.6f&dt=%ld&units=imperial&appid=%s",
+           latitude_, longitude_, (long)fetchDt, apiKey_.c_str());
+  String url(buf);
+  DEBUG_PRINTF("SkyStrip: %s::checkhistory URL: %s\n", name().c_str(), url.c_str());
+
+  auto doc = getJson(url);
+  if (!doc) {
+    DEBUG_PRINTF("SkyStrip: %s::checkhistory failed: no JSON\n", name().c_str());
+    return nullptr;
+  }
+
+  JsonObject root = doc->as<JsonObject>();
+  JsonArray hourly = root["hourly"].as<JsonArray>();
+  if (hourly.isNull()) hourly = root["data"].as<JsonArray>();
+  if (hourly.isNull()) {
+    DEBUG_PRINTF("SkyStrip: %s::checkhistory failed: no hourly/data field\n", name().c_str());
+    return nullptr;
+  }
+
+  auto model = ::make_unique<SkyModel>();
+  model->lcl_tstamp = now;
+  model->sunrise_ = 0;
+  model->sunset_ = 0;
+  for (JsonObject hour : hourly) {
+    time_t dt = hour["dt"].as<time_t>();
+    if (dt >= oldestTstamp) continue;
+    model->temperature_forecast.push_back({ dt, hour["temp"].as<double>() });
+    model->dew_point_forecast.push_back({ dt, hour["dew_point"].as<double>() });
+    model->wind_speed_forecast.push_back({ dt, hour["wind_speed"].as<double>() });
+    model->wind_dir_forecast.push_back({ dt, hour["wind_deg"].as<double>() });
+    model->wind_gust_forecast.push_back({ dt, hour["wind_gust"].as<double>() });
+    model->cloud_cover_forecast.push_back({ dt, hour["clouds"].as<double>() });
+    JsonArray wArr = hour["weather"].as<JsonArray>();
+    bool hasRain = false, hasSnow = false;
+    if (hour.containsKey("rain")) {
+      double v = hour["rain"]["1h"] | 0.0;
+      if (v > 0.0) hasRain = true;
+    }
+    if (hour.containsKey("snow")) {
+      double v = hour["snow"]["1h"] | 0.0;
+      if (v > 0.0) hasSnow = true;
+    }
+    if (!hasRain && !hasSnow && !wArr.isNull() && wArr.size() > 0) {
+      String main = wArr[0]["main"] | String("");
+      main.toLowerCase();
+      if (main == F("rain") || main == F("drizzle") || main == F("thunderstorm"))
+        hasRain = true;
+      else if (main == F("snow"))
+        hasSnow = true;
+    }
+    int ptype = hasRain && hasSnow ? 3 : (hasSnow ? 2 : (hasRain ? 1 : 0));
+    model->precip_type_forecast.push_back({ dt, double(ptype) });
+    model->precip_prob_forecast.push_back({ dt, hour["pop"].as<double>() });
+  }
+
+  if (model->temperature_forecast.empty()) return nullptr;
   return model;
 }
 

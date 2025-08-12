@@ -27,6 +27,7 @@ public:
   SkyModel & update(time_t now, SkyModel && other);  // use std::move
   void invalidate_history(time_t now);
   String toString(time_t now) const;
+  time_t oldest() const;
 
   std::time_t lcl_tstamp{0};			// update timestamp from our clock
   std::deque<DataPoint> temperature_forecast;
