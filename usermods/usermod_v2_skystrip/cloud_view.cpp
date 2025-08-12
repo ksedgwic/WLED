@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include "time_util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
@@ -80,6 +81,46 @@ void CloudView::view(time_t now, SkyModel const & model) {
   constexpr double kHorizonSec = 48.0 * 3600.0;
   const double step = (len > 1) ? (kHorizonSec / double(len - 1)) : 0.0;
 
+  const time_t markerTol = time_t(std::llround(step * 0.5));
+  const time_t sunrise = model.sunrise_;
+  const time_t sunset  = model.sunset_;
+  constexpr time_t DAY = 24 * 60 * 60;
+  const time_t MAXTT = std::numeric_limits<time_t>::max();
+
+  long offset = time_util::current_offset();
+
+  bool useSunrise = (sunrise != 0 && sunrise != MAXTT);
+  bool useSunset  = (sunset  != 0 && sunset  != MAXTT);
+  time_t sunriseTOD = 0;
+  time_t sunsetTOD  = 0;
+  if (useSunrise) sunriseTOD = (sunrise + offset) % DAY;
+  if (useSunset)  sunsetTOD  = (sunset  + offset) % DAY;
+
+  auto nearTOD = [&](time_t a, time_t b) {
+    time_t diff = (a >= b) ? (a - b) : (b - a);
+    if (diff <= markerTol) return true;
+    return (DAY - diff) <= markerTol;
+  };
+
+  auto isMarker = [&](time_t t) {
+    if (!useSunrise && !useSunset) return false;
+    time_t tod = (t + offset) % DAY;
+    if (useSunrise && nearTOD(tod, sunriseTOD)) return true;
+    if (useSunset  && nearTOD(tod, sunsetTOD)) return true;
+    return false;
+  };
+
+  constexpr float kCloudMaskThreshold = 0.05f;
+  constexpr float kDayHue   = 42.f;
+  constexpr float kNightHue = 300.f;
+  constexpr float kDaySat   = 0.40f;
+  constexpr float kNightSat = 0.20f;
+  constexpr float kDayVMax  = 0.50f;
+  constexpr float kNightVMax= 0.40f;
+  constexpr float kMarkerHue= 25.f;
+  constexpr float kMarkerSat= 0.60f;
+  constexpr float kMarkerVal= 0.50f;
+
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
     double clouds, precipTypeVal, precipProb;
@@ -87,53 +128,35 @@ void CloudView::view(time_t now, SkyModel const & model) {
     if (!estimateAt(model.precip_type_forecast, t, precipTypeVal)) precipTypeVal = 0.0;
     if (!estimateAt(model.precip_prob_forecast, t, precipProb)) precipProb = 0.0;
 
-    // Only light LEDs when there are clouds (or precip present).
     float clouds01 = clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
-    if (clouds01 <= 0.f && (p == 0 || precipProb <= 0.0)) {
-      int idx = seg.reverse ? (end - i) : (start + i);
-      strip.setPixelColor(idx, 0);
-      continue;
-    }
 
     uint32_t col = 0;
-    // Precipitation has priority: rain=blue, snow=white, mixed=cyan-ish.
-    if (p != 0 && precipProb > 0.0) {
+    if (isMarker(t)) {
+      // always put the sunrise sunset markers in
+      col = hsv2rgb(kMarkerHue, kMarkerSat, kMarkerVal);
+    } else if (p != 0 && precipProb > 0.0) {
+      // precipitation has next priority: rain=blue, snow=white, mixed=cyan-ish
       float ph, ps;
-      if (p == 1)      { ph = 210.f; ps = 1.0f; }   // rain → blue
-      else if (p == 2) { ph = 0.f;   ps = 0.0f; }   // snow → white
-      else             { ph = 180.f; ps = 0.5f; }   // mixed
-      float pv = clamp01(float(precipProb));        // intensity ~ PoP
-      pv = 0.3f + 0.7f * pv;                        // keep visible at low PoP
+      if (p == 1)      { ph = 210.f; ps = 1.0f; }
+      else if (p == 2) { ph = 0.f;   ps = 0.0f; }
+      else             { ph = 180.f; ps = 0.5f; }
+      float pv = clamp01(float(precipProb));
+      pv = 0.3f + 0.7f * pv;
       col = hsv2rgb(ph, ps, pv);
     } else {
-      // No precip: desaturated day/night, intensity tracks cloud cover.
-      // Mask very low cloud amounts: below 5% we show nothing.
-      constexpr float kCloudMaskThreshold = 0.05f;
+      // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
         int idx = seg.reverse ? (end - i) : (start + i);
         strip.setPixelColor(idx, 0);
         continue;
       }
-
-      const bool daytime = isDay(model, t);
-      const float vmax = daytime ? 0.70f : 0.60f;   // cap brightness
-      const float vmin = daytime ? 0.18f : 0.00f;   // floor for purity
-
-      float u = clamp01(clouds01);                  // 0..1 cloudiness
-      const float shaped = powf(u, 0.8f);           // gamma-shaped ramp
-      const float val    = vmin + (vmax - vmin) * shaped;
-
-      // Near-zero chroma protection (daytime only):
-      // As shaped→0, push hue toward pure yellow (~58°) and add sat.
-      const float baseHue = daytime ? 48.f  : 300.f;  // yellow / magenta
-      const float baseSat = daytime ? 0.45f : 0.20f;  // day more saturated
-      const float near    = 1.f - shaped;             // stronger boost near zero
-      const float hueEff  = daytime ? (baseHue + (58.f - baseHue) * (0.8f * near)) : baseHue;
-      float satEff        = baseSat + (daytime ? 0.30f * near : 0.f);
-      satEff = clamp01(satEff);
-
-      col = hsv2rgb(hueEff, satEff, val);
+      bool daytime = isDay(model, t);
+      float vmax = daytime ? kDayVMax : kNightVMax;
+      float val = clouds01 * vmax;
+      float hue = daytime ? kDayHue : kNightHue;
+      float sat = daytime ? kDaySat : kNightSat;
+      col = hsv2rgb(hue, sat, val);
     }
 
     int idx = seg.reverse ? (end - i) : (start + i);
