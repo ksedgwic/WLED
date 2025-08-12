@@ -7,21 +7,32 @@
 #include "time_util.h"
 
 namespace {
-static constexpr time_t HISTORY_SEC = 24 * 60 * 60;
+  static constexpr time_t HISTORY_SEC = 25 * 60 * 60;  // keep an extra history point
 
 template <class Series>
 void mergeSeries(Series &current, Series &&fresh, time_t now) {
-  Series merged = std::move(fresh);
-  time_t earliest_new = merged.empty()
-                          ? std::numeric_limits<time_t>::max()
-                          : merged.front().tstamp;
+  Series merged;
 
-  Series older;
-  for (const auto &dp : current) {
-    if (dp.tstamp < earliest_new) older.push_back(dp);
-    else break;
+  if (fresh.empty()) {
+    merged = current;
+  } else if (current.empty()) {
+    merged = std::move(fresh);
+  } else if (fresh.back().tstamp < current.front().tstamp) {
+    // incoming data is entirely older than what we have, prepend it
+    merged = std::move(fresh);
+    merged.insert(merged.end(), current.begin(), current.end());
+  } else {
+    // incoming data is current or newer, keep older history
+    merged = std::move(fresh);
+    time_t earliest_new = merged.front().tstamp;
+
+    Series older;
+    for (const auto &dp : current) {
+      if (dp.tstamp < earliest_new) older.push_back(dp);
+      else break;
+    }
+    merged.insert(merged.begin(), older.begin(), older.end());
   }
-  merged.insert(merged.begin(), older.begin(), older.end());
 
   time_t cutoff = now - HISTORY_SEC;
   while (!merged.empty() && merged.front().tstamp < cutoff) {
@@ -43,8 +54,10 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   mergeSeries(precip_type_forecast, std::move(other.precip_type_forecast), now);
   mergeSeries(precip_prob_forecast, std::move(other.precip_prob_forecast), now);
 
-  sunrise_ = other.sunrise_;
-  sunset_  = other.sunset_;
+  if (!(other.sunrise_ == 0 && other.sunset_ == 0)) {
+    sunrise_ = other.sunrise_;
+    sunset_  = other.sunset_;
+  }
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
@@ -64,6 +77,23 @@ void SkyModel::invalidate_history(time_t now) {
   precip_prob_forecast.clear();
   sunrise_ = 0;
   sunset_  = 0;
+}
+
+time_t SkyModel::oldest() const {
+  time_t out = std::numeric_limits<time_t>::max();
+  auto upd = [&](const std::deque<DataPoint>& s){
+    if (!s.empty() && s.front().tstamp < out) out = s.front().tstamp;
+  };
+  upd(temperature_forecast);
+  upd(dew_point_forecast);
+  upd(wind_speed_forecast);
+  upd(wind_gust_forecast);
+  upd(wind_dir_forecast);
+  upd(cloud_cover_forecast);
+  upd(precip_type_forecast);
+  upd(precip_prob_forecast);
+  if (out == std::numeric_limits<time_t>::max()) return 0;
+  return out;
 }
 
 template <class Series>

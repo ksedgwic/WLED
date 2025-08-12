@@ -16,6 +16,7 @@ public:
 
   // IDataSourceT<SkyModel>
   std::unique_ptr<SkyModel> fetch(std::time_t now) override;
+  std::unique_ptr<SkyModel> checkhistory(std::time_t now, std::time_t oldestTstamp) override;
   void reload(std::time_t now) override;
   std::string name() const override { return "OWM"; }
 
@@ -37,5 +38,6 @@ private:
   double longitude_;
   unsigned int intervalSec_;
   std::time_t lastFetch_;
+  std::time_t lastHistFetch_;
   std::string lastLocation_;
 };

@@ -25,6 +25,9 @@ public:
   /// Fetch new data, nullptr if no new data
   virtual std::unique_ptr<ModelType> fetch(std::time_t now) = 0;
 
+  /// Backfill older history if needed, nullptr if no new data
+  virtual std::unique_ptr<ModelType> checkhistory(std::time_t now, std::time_t oldestTstamp) = 0;
+
   /// Force the internal schedule to fetch ASAP (e.g. after ON or re-enable)
   virtual void reload(std::time_t now) = 0;
 
