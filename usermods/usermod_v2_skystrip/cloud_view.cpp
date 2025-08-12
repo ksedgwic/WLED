@@ -3,6 +3,7 @@
 #include "wled.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
@@ -27,6 +28,18 @@ static bool estimateAt(const Series& v, time_t t, double& out) {
     }
   }
   return false;
+}
+
+static bool isDay(const SkyModel& m, time_t t) {
+  const time_t MAXTT = std::numeric_limits<time_t>::max();
+  if (m.sunrise_ == 0 && m.sunset_ == MAXTT) return true;   // 24h day
+  if (m.sunset_ == 0 && m.sunrise_ == MAXTT) return false;  // 24h night
+  constexpr time_t DAY = 24 * 60 * 60;
+  time_t sr = m.sunrise_;
+  time_t ss = m.sunset_;
+  while (t >= ss) { sr += DAY; ss += DAY; }
+  while (t < sr)  { sr -= DAY; ss -= DAY; }
+  return t >= sr && t < ss;
 }
 
 static uint32_t hsv2rgb(float h, float s, float v) {
@@ -69,9 +82,8 @@ void CloudView::view(time_t now, SkyModel const & model) {
 
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
-    double clouds, dayVal, precipTypeVal, precipProb;
+    double clouds, precipTypeVal, precipProb;
     if (!estimateAt(model.cloud_cover_forecast, t, clouds)) continue;
-    if (!estimateAt(model.daylight_forecast, t, dayVal)) dayVal = 1.0;
     if (!estimateAt(model.precip_type_forecast, t, precipTypeVal)) precipTypeVal = 0.0;
     if (!estimateAt(model.precip_prob_forecast, t, precipProb)) precipProb = 0.0;
 
@@ -104,7 +116,7 @@ void CloudView::view(time_t now, SkyModel const & model) {
         continue;
       }
 
-      const bool daytime = dayVal >= 0.5;
+      const bool daytime = isDay(model, t);
       const float vmax = daytime ? 0.70f : 0.60f;   // cap brightness
       const float vmin = daytime ? 0.18f : 0.00f;   // floor for purity
 

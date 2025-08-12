@@ -39,10 +39,12 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   mergeSeries(wind_speed_forecast, std::move(other.wind_speed_forecast), now);
   mergeSeries(wind_gust_forecast, std::move(other.wind_gust_forecast), now);
   mergeSeries(wind_dir_forecast, std::move(other.wind_dir_forecast), now);
-  mergeSeries(daylight_forecast, std::move(other.daylight_forecast), now);
   mergeSeries(cloud_cover_forecast, std::move(other.cloud_cover_forecast), now);
   mergeSeries(precip_type_forecast, std::move(other.precip_type_forecast), now);
   mergeSeries(precip_prob_forecast, std::move(other.precip_prob_forecast), now);
+
+  sunrise_ = other.sunrise_;
+  sunset_  = other.sunset_;
 
   char nowBuf[20];
   time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
@@ -57,10 +59,11 @@ void SkyModel::invalidate_history(time_t now) {
   wind_speed_forecast.clear();
   wind_gust_forecast.clear();
   wind_dir_forecast.clear();
-  daylight_forecast.clear();
   cloud_cover_forecast.clear();
   precip_type_forecast.clear();
   precip_prob_forecast.clear();
+  sunrise_ = 0;
+  sunset_  = 0;
 }
 
 template <class Series>
@@ -108,9 +111,18 @@ String SkyModel::toString(time_t now) const {
   appendSeriesMDHM(out, now, F(" wspd"), wind_speed_forecast);
   appendSeriesMDHM(out, now, F(" wgst"), wind_gust_forecast);
   appendSeriesMDHM(out, now, F(" wdir"), wind_dir_forecast);
-  appendSeriesMDHM(out, now, F(" day"), daylight_forecast);
   appendSeriesMDHM(out, now, F(" clds"), cloud_cover_forecast);
   appendSeriesMDHM(out, now, F(" prcp"), precip_type_forecast);
   appendSeriesMDHM(out, now, F(" pop"), precip_prob_forecast);
+
+  char tb[20];
+  time_util::fmt_local(tb, sizeof(tb), sunrise_);
+  out += F("SkyModel: sunrise ");
+  out += tb;
+  out += F("\n");
+  time_util::fmt_local(tb, sizeof(tb), sunset_);
+  out += F("SkyModel: sunset ");
+  out += tb;
+  out += F("\n");
   return out;
 }
