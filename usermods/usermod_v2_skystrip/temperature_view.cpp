@@ -1,5 +1,6 @@
 #include "temperature_view.h"
 #include "skymodel.h"
+#include "time_util.h"
 #include "wled.h"          // Segment, strip, RGBW32
 #include <algorithm>
 #include <cmath>
@@ -141,21 +142,45 @@ void TemperatureView::view(time_t now, SkyModel const & model) {
 
   constexpr double kHorizonSec = 48.0 * 3600.0;
   const double step = (len > 1) ? (kHorizonSec / double(len - 1)) : 0.0;
+  constexpr time_t DAY = 24 * 60 * 60;
+  const long tzOffset = time_util::current_offset();
+
+  // Returns [0,1] marker weight based on proximity to midnight/noon boundaries
+  // in local time.
+  auto markerWeight = [&](time_t t) {
+    if (step <= 0.0) return 0.f;
+    time_t local = t + tzOffset;                    // convert to local seconds
+    time_t s = local % DAY; if (s < 0) s += DAY;
+    time_t diffMid  = (s <= DAY/2) ? s : DAY - s;
+    time_t diffNoon = (s >= DAY/2) ? s - DAY/2 : DAY/2 - s;
+    time_t diff = (diffMid < diffNoon) ? diffMid : diffNoon;
+    float w = 1.f - float(diff) / float(step); // 1 at center, 0 one pixel away
+    return (w > 0.f) ? w : 0.f;
+  };
 
   for (uint16_t i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
+    int idx = seg.reverse ? (end - i) : (start + i);
 
     double tempF;
-    if (!estimateTempAt(model, t, tempF)) continue;
-    uint32_t col = colorForTempF(tempF);
+    uint32_t col = 0;
+    if (estimateTempAt(model, t, tempF)) {
+      col = colorForTempF(tempF);
 
-    double dewF;
-    float sat = 1.0f;
-    if (estimateDewPtAt(model, t, dewF)) {
-      sat = satFromDewSpreadF((float)tempF, (float)dewF);
+      double dewF;
+      float sat = 1.0f;
+      if (estimateDewPtAt(model, t, dewF)) {
+        sat = satFromDewSpreadF((float)tempF, (float)dewF);
+      }
+      col = applySaturation(col, sat);
+      col = applyBrightness(col, 0.7f);
     }
-    col = applySaturation(col, sat);
-    col = applyBrightness(col, 0.7f);
+
+    float m = markerWeight(t);
+    if (m > 0.f) {
+      uint8_t blend = uint8_t(std::lround(m * 255.f));
+      col = color_blend(col, 0, blend);
+    }
 
     // static time_t lastDebug = 0;
     // if (now - lastDebug > 5) {
@@ -164,7 +189,6 @@ void TemperatureView::view(time_t now, SkyModel const & model) {
     //   lastDebug = now;
     // }
 
-    int idx = seg.reverse ? (end - i) : (start + i);
     strip.setPixelColor(idx, col);
   }
 }
