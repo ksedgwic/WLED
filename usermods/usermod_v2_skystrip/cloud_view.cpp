@@ -75,23 +75,53 @@ void CloudView::view(time_t now, SkyModel const & model) {
     if (!estimateAt(model.precip_type_forecast, t, precipTypeVal)) precipTypeVal = 0.0;
     if (!estimateAt(model.precip_prob_forecast, t, precipProb)) precipProb = 0.0;
 
-    bool daytime = dayVal >= 0.5;
-    float hue = daytime ? 50.f : 265.f;
-    float val = daytime ? 0.8f : 0.4f;
-    float maxSat = daytime ? 1.f : 0.8f;
-    float sat = maxSat * (1.f - clamp01(float(clouds / 100.0)));
-
-    uint32_t col = hsv2rgb(hue, sat, val);
-
+    // Only light LEDs when there are clouds (or precip present).
+    float clouds01 = clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
+    if (clouds01 <= 0.f && (p == 0 || precipProb <= 0.0)) {
+      int idx = seg.reverse ? (end - i) : (start + i);
+      strip.setPixelColor(idx, 0);
+      continue;
+    }
+
+    uint32_t col = 0;
+    // Precipitation has priority: rain=blue, snow=white, mixed=cyan-ish.
     if (p != 0 && precipProb > 0.0) {
-      float ph, ps, pv;
-      if (p == 1)      { ph = 210.f; ps = 1.f;   pv = 1.f; }
-      else if (p == 2) { ph = 0.f;   ps = 0.f;   pv = 1.f; }
-      else             { ph = 180.f; ps = 0.5f; pv = 1.f; }
-      uint32_t pcol = hsv2rgb(ph, ps, pv);
-      uint8_t blend = uint8_t(clamp01(float(precipProb)) * 255.f);
-      col = color_blend(col, pcol, blend);
+      float ph, ps;
+      if (p == 1)      { ph = 210.f; ps = 1.0f; }   // rain → blue
+      else if (p == 2) { ph = 0.f;   ps = 0.0f; }   // snow → white
+      else             { ph = 180.f; ps = 0.5f; }   // mixed
+      float pv = clamp01(float(precipProb));        // intensity ~ PoP
+      pv = 0.3f + 0.7f * pv;                        // keep visible at low PoP
+      col = hsv2rgb(ph, ps, pv);
+    } else {
+      // No precip: desaturated day/night, intensity tracks cloud cover.
+      // Mask very low cloud amounts: below 5% we show nothing.
+      constexpr float kCloudMaskThreshold = 0.05f;
+      if (clouds01 < kCloudMaskThreshold) {
+        int idx = seg.reverse ? (end - i) : (start + i);
+        strip.setPixelColor(idx, 0);
+        continue;
+      }
+
+      const bool daytime = dayVal >= 0.5;
+      const float vmax = daytime ? 0.70f : 0.60f;   // cap brightness
+      const float vmin = daytime ? 0.18f : 0.00f;   // floor for purity
+
+      float u = clamp01(clouds01);                  // 0..1 cloudiness
+      const float shaped = powf(u, 0.8f);           // gamma-shaped ramp
+      const float val    = vmin + (vmax - vmin) * shaped;
+
+      // Near-zero chroma protection (daytime only):
+      // As shaped→0, push hue toward pure yellow (~58°) and add sat.
+      const float baseHue = daytime ? 48.f  : 300.f;  // yellow / magenta
+      const float baseSat = daytime ? 0.45f : 0.20f;  // day more saturated
+      const float near    = 1.f - shaped;             // stronger boost near zero
+      const float hueEff  = daytime ? (baseHue + (58.f - baseHue) * (0.8f * near)) : baseHue;
+      float satEff        = baseSat + (daytime ? 0.30f * near : 0.f);
+      satEff = clamp01(satEff);
+
+      col = hsv2rgb(hueEff, satEff, val);
     }
 
     int idx = seg.reverse ? (end - i) : (start + i);

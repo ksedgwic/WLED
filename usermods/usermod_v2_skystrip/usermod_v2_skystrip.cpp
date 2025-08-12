@@ -30,9 +30,9 @@ SkyStrip::SkyStrip() {
   DEBUG_PRINTLN(F("SkyStrip::SkyStrip CTOR"));
   sources_.push_back(::make_unique<OpenWeatherMapSource>());
   model_ = ::make_unique<SkyModel>();
-  views_.push_back(::make_unique<TemperatureView>());
-  views_.push_back(::make_unique<WindView>());
   views_.push_back(::make_unique<CloudView>());
+  views_.push_back(::make_unique<WindView>());
+  views_.push_back(::make_unique<TemperatureView>());
   views_.push_back(::make_unique<DeltaView>());
 }
 
