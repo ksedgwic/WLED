@@ -59,10 +59,10 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
     sunset_  = other.sunset_;
   }
 
-  char nowBuf[20];
-  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
-  DEBUG_PRINTF("SkyStrip: SkyModel::update: %s\n%s", nowBuf, toString(now).c_str());
-
+  emitDebug(now, [](const String& line){
+    DEBUG_PRINTF("%s\n", line.c_str());
+  });
+ 
   return *this;
 }
 
@@ -96,63 +96,73 @@ time_t SkyModel::oldest() const {
   return out;
 }
 
+// Streamed/line-by-line variant to keep packets small.
 template <class Series>
-static inline void appendSeriesMDHM(String &out, time_t now,
-                                    const __FlashStringHelper *label,
-                                    const Series &s) {
-  out += F("SkyModel: ");
-  out += label;
-  out += F("(");
-  out += String(s.size());
-  out += F("):[\n");
+static inline void emitSeriesMDHM(const std::function<void(const String&)> &emit,
+                                  time_t /*now*/,
+                                  const __FlashStringHelper *label,
+                                  const Series &s) {
+  // Header
+  {
+    String line;
+    line.reserve(64);
+    line += F("SkyModel: ");
+    line += label;
+    line += F("(");
+    line += String(s.size());
+    line += F("):[");
+    emit(line);
+  }
 
   if (s.empty()) {
-    out += F("SkyModel: ]\n");
+    emit(String(F("SkyModel: ]")));
     return;
   }
 
   char tb[20];
   char valbuf[16];
   size_t i = 0;
+  String line;
+  line.reserve(256);
   for (const auto& dp : s) {
     if (i % 6 == 0) {
-      out += F("SkyModel: ");
+      if (line.length()) { emit(line); line = String(); line.reserve(256); }
+      line += F("SkyModel: ");
     }
     time_util::fmt_local(tb, sizeof(tb), dp.tstamp);
     snprintf(valbuf, sizeof(valbuf), "%6.2f", dp.value);
-    out += F(" (");
-    out += tb;
-    out += F(", ");
-    out += valbuf;
-    out += F(")");
+    line += F(" (");
+    line += tb;
+    line += F(", ");
+    line += valbuf;
+    line += F(")");
     if (i % 6 == 5 || i == s.size() - 1) {
-      if (i == s.size() - 1) out += F(" ]\n");
-      else out += F("\n");
+      if (i == s.size() - 1) line += F(" ]");
+      emit(line);
+      line = String();
+      line.reserve(256);
     }
     ++i;
   }
 }
 
+void SkyModel::emitDebug(time_t now, const std::function<void(const String&)> &emit) const {
+  emitSeriesMDHM(emit, now, F(" temp"),  temperature_forecast);
+  emitSeriesMDHM(emit, now, F(" dwpt"),  dew_point_forecast);
+  emitSeriesMDHM(emit, now, F(" wspd"),  wind_speed_forecast);
+  emitSeriesMDHM(emit, now, F(" wgst"),  wind_gust_forecast);
+  emitSeriesMDHM(emit, now, F(" wdir"),  wind_dir_forecast);
+  emitSeriesMDHM(emit, now, F(" clds"),  cloud_cover_forecast);
+  emitSeriesMDHM(emit, now, F(" prcp"),  precip_type_forecast);
+  emitSeriesMDHM(emit, now, F(" pop"),   precip_prob_forecast);
 
-String SkyModel::toString(time_t now) const {
-  String out;
-  appendSeriesMDHM(out, now, F(" temp"), temperature_forecast);
-  appendSeriesMDHM(out, now, F(" dwpt"), dew_point_forecast);
-  appendSeriesMDHM(out, now, F(" wspd"), wind_speed_forecast);
-  appendSeriesMDHM(out, now, F(" wgst"), wind_gust_forecast);
-  appendSeriesMDHM(out, now, F(" wdir"), wind_dir_forecast);
-  appendSeriesMDHM(out, now, F(" clds"), cloud_cover_forecast);
-  appendSeriesMDHM(out, now, F(" prcp"), precip_type_forecast);
-  appendSeriesMDHM(out, now, F(" pop"), precip_prob_forecast);
-
-  char tb[20];
-  time_util::fmt_local(tb, sizeof(tb), sunrise_);
-  out += F("SkyModel: sunrise ");
-  out += tb;
-  out += F("\n");
-  time_util::fmt_local(tb, sizeof(tb), sunset_);
-  out += F("SkyModel: sunset ");
-  out += tb;
-  out += F("\n");
-  return out;
+  // Sunrise / Sunset as separate small lines
+  {
+    char tb[20];
+    String line;
+    time_util::fmt_local(tb, sizeof(tb), sunrise_);
+    line  = F("SkyModel: sunrise "); line += tb; emit(line);
+    time_util::fmt_local(tb, sizeof(tb), sunset_);
+    line  = F("SkyModel: sunset ");  line += tb; emit(line);
+  }
 }
