@@ -1,8 +1,9 @@
 #pragma once
 
 #include <ctime>
-#include <memory>
 #include <deque>
+#include <functional>
+#include <memory>
 
 #include "interfaces.h"
 
@@ -26,8 +27,8 @@ public:
 
   SkyModel & update(time_t now, SkyModel && other);  // use std::move
   void invalidate_history(time_t now);
-  String toString(time_t now) const;
   time_t oldest() const;
+  void emitDebug(time_t now, const std::function<void(const String&)> &emit) const;
 
   std::time_t lcl_tstamp{0};			// update timestamp from our clock
   std::deque<DataPoint> temperature_forecast;
