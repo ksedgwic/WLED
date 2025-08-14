@@ -12,6 +12,7 @@
 #include "wind_view.h"
 #include "cloud_view.h"
 #include "delta_view.h"
+#include "test_pattern_view.h"
 
 const char CFG_NAME[] = "SkyStrip";
 const char CFG_ENABLED[] = "Enabled";
@@ -35,6 +36,7 @@ SkyStrip::SkyStrip() {
   views_.push_back(::make_unique<WindView>());
   views_.push_back(::make_unique<TemperatureView>());
   views_.push_back(::make_unique<DeltaView>());
+  views_.push_back(::make_unique<TestPatternView>());
 }
 
 void SkyStrip::setup() {

@@ -1,8 +1,8 @@
 # SkyStrip
 
 This usermod displays the weather forecast on several parallel LED strips.
-It currently includes Temperature, Wind, Delta, and Cloud views. Cloud view shades
-day/night colors by cloud cover and blends in precipitation colors scaled by
+It currently includes Temperature, Wind, Delta, Cloud, and TestPattern views.
+Cloud view shades day/night colors by cloud cover and blends in precipitation colors scaled by
  probability of precipitation. It also marks sunrise and sunset. Temperature view
  adds orientation cues with black markers at local midnight and local noon across
  the two-day timeline, blending them across adjacent pixels for sub-pixel
