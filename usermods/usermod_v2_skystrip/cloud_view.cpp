@@ -14,11 +14,17 @@ template<typename T> static inline T clamp01(T v) {
   return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
 }
 
+const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
 template<class Series>
-static bool estimateAt(const Series& v, time_t t, double& out) {
+static bool estimateAt(const Series& v, time_t t, double step, double& out) {
   if (v.empty()) return false;
+  // if it's too far away we didn't find estimate
+  if (t < v.front().tstamp - GRACE_SEC) return false;
+  if (t > v.back().tstamp  + GRACE_SEC) return false;
+  // just off the end uses end value
   if (t <= v.front().tstamp) { out = v.front().value; return true; }
   if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
+  // otherwise interpolate
   for (size_t i = 1; i < v.size(); ++i) {
     if (t <= v[i].tstamp) {
       const auto& a = v[i-1]; const auto& b = v[i];
@@ -66,7 +72,7 @@ CloudView::CloudView()
   DEBUG_PRINTLN("SkyStrip: CV::CTOR");
 }
 
-void CloudView::view(time_t now, SkyModel const & model) {
+void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
   if (segId_ == DEFAULT_SEG_ID) return;
   if (model.cloud_cover_forecast.empty()) return;
   if (segId_ < 0 || segId_ >= strip.getMaxSegments()) return;
@@ -124,9 +130,9 @@ void CloudView::view(time_t now, SkyModel const & model) {
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
     double clouds, precipTypeVal, precipProb;
-    if (!estimateAt(model.cloud_cover_forecast, t, clouds)) continue;
-    if (!estimateAt(model.precip_type_forecast, t, precipTypeVal)) precipTypeVal = 0.0;
-    if (!estimateAt(model.precip_prob_forecast, t, precipProb)) precipProb = 0.0;
+    if (!estimateAt(model.cloud_cover_forecast, t, step, clouds)) continue;
+    if (!estimateAt(model.precip_type_forecast, t, step, precipTypeVal)) precipTypeVal = 0.0;
+    if (!estimateAt(model.precip_prob_forecast, t, step, precipProb)) precipProb = 0.0;
 
     float clouds01 = clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
@@ -157,6 +163,17 @@ void CloudView::view(time_t now, SkyModel const & model) {
       float hue = daytime ? kDayHue : kNightHue;
       float sat = daytime ? kDaySat : kNightSat;
       col = hsv2rgb(hue, sat, val);
+
+      if (dbgPixelIndex >= 0) {
+        static time_t lastDebug = 0;
+        if (now - lastDebug > 30 && i == dbgPixelIndex) {
+          char tmbuf0[20];
+          time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
+          DEBUG_PRINTF("SkyStrip: %s: i=%u timeNow=%s day=%d clouds01=%.2f sat=%.2f col=%08x\n",
+                       name().c_str(), i, tmbuf0, daytime, clouds01, sat, (unsigned)col);
+          lastDebug = now;
+        }
+      }
     }
 
     int idx = seg.reverse ? (end - i) : (start + i);

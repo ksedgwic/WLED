@@ -18,11 +18,17 @@ template<typename T> static inline T clamp01(T v) {
   return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
 }
 
+const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
 template<class Series>
-static bool estimateAt(const Series& v, time_t t, double& out) {
+static bool estimateAt(const Series& v, time_t t, double step, double& out) {
   if (v.empty()) return false;
+  // if it's too far away we didn't find estimate
+  if (t < v.front().tstamp - GRACE_SEC) return false;
+  if (t > v.back().tstamp  + GRACE_SEC) return false;
+  // just off the end uses end value
   if (t <= v.front().tstamp) { out = v.front().value; return true; }
   if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
+  // otherwise interpolate
   for (size_t i = 1; i < v.size(); ++i) {
     if (t <= v[i].tstamp) {
       const auto& a = v[i-1]; const auto& b = v[i];
@@ -35,11 +41,11 @@ static bool estimateAt(const Series& v, time_t t, double& out) {
   return false;
 }
 
-static bool estimateTempAt(const SkyModel& m, time_t t, double& outF)    {
-  return estimateAt(m.temperature_forecast, t, outF);
+static bool estimateTempAt(const SkyModel& m, time_t t, double step, double& outF)    {
+  return estimateAt(m.temperature_forecast, t, step, outF);
 }
-static bool estimateDewPtAt(const SkyModel& m, time_t t, double& outFdp) {
-  return estimateAt(m.dew_point_forecast, t, outFdp);
+static bool estimateDewPtAt(const SkyModel& m, time_t t, double step, double& outFdp) {
+  return estimateAt(m.dew_point_forecast, t, step, outFdp);
 }
 
 // Assumes RGBW32 packs as (W<<24 | R<<16 | G<<8 | B).
@@ -128,7 +134,7 @@ TemperatureView::TemperatureView()
   DEBUG_PRINTLN("SkyStrip: TV::CTOR");
 }
 
-void TemperatureView::view(time_t now, SkyModel const & model) {
+void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
   if (segId_ == DEFAULT_SEG_ID) return;                      // disabled
   if (model.temperature_forecast.empty()) return;            // nothing to render
 
@@ -162,14 +168,14 @@ void TemperatureView::view(time_t now, SkyModel const & model) {
     const time_t t = now + time_t(std::llround(step * i));
     int idx = seg.reverse ? (end - i) : (start + i);
 
-    double tempF;
+    double tempF = 0.f;
+    double dewF = 0.f;
     uint32_t col = 0;
-    if (estimateTempAt(model, t, tempF)) {
+    float sat = 1.0f;
+    if (estimateTempAt(model, t, step, tempF)) {
       col = colorForTempF(tempF);
 
-      double dewF;
-      float sat = 1.0f;
-      if (estimateDewPtAt(model, t, dewF)) {
+      if (estimateDewPtAt(model, t, step, dewF)) {
         sat = satFromDewSpreadF((float)tempF, (float)dewF);
       }
       col = applySaturation(col, sat);
@@ -182,12 +188,16 @@ void TemperatureView::view(time_t now, SkyModel const & model) {
       col = color_blend(col, 0, blend);
     }
 
-    // static time_t lastDebug = 0;
-    // if (now - lastDebug > 5) {
-    //   DEBUG_PRINTF("TV: i=%u T=%.1fF D=%.1fF sat=%.2f col=%08x\n",
-    //                i, tempF, dewF, sat, (unsigned)col);
-    //   lastDebug = now;
-    // }
+    if (dbgPixelIndex >= 0) {
+      static time_t lastDebug = 0;
+      if (now - lastDebug > 30 && i == dbgPixelIndex) {
+        char tmbuf0[20];
+        time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
+        DEBUG_PRINTF("SkyStrip: TV: i=%u                      timeNow=%s                     T=%.1fF           D=%.1fF sat=%.2f col=%08x\n",
+                     i, tmbuf0, tempF, dewF, sat, (unsigned)col);
+        lastDebug = now;
+      }
+    }
 
     strip.setPixelColor(idx, col);
   }

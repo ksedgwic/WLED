@@ -10,7 +10,7 @@ public:
   CloudView();
   ~CloudView() override = default;
 
-  void view(time_t now, SkyModel const & model) override;
+  void view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) override;
   std::string name() const override { return "CV"; }
 
   void addToConfig(JsonObject& subtree) override;

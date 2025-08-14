@@ -12,11 +12,17 @@ template<typename T> static inline T clamp01(T v) {
   return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
 }
 
+const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
 template<class Series>
-static bool estimateAt(const Series& v, time_t t, double& out) {
+static bool estimateAt(const Series& v, time_t t, double step, double& out) {
   if (v.empty()) return false;
+  // if it's too far away we didn't find estimate
+  if (t < v.front().tstamp - GRACE_SEC) return false;
+  if (t > v.back().tstamp  + GRACE_SEC) return false;
+  // just off the end uses end value
   if (t <= v.front().tstamp) { out = v.front().value; return true; }
   if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
+  // otherwise interpolate
   for (size_t i = 1; i < v.size(); ++i) {
     if (t <= v[i].tstamp) {
       const auto& a = v[i-1]; const auto& b = v[i];
@@ -29,14 +35,14 @@ static bool estimateAt(const Series& v, time_t t, double& out) {
   return false;
 }
 
-static bool estimateSpeedAt(const SkyModel& m, time_t t, double& out) {
-  return estimateAt(m.wind_speed_forecast, t, out);
+static bool estimateSpeedAt(const SkyModel& m, time_t t, double step, double& out) {
+  return estimateAt(m.wind_speed_forecast, t, step, out);
 }
-static bool estimateDirAt(const SkyModel& m, time_t t, double& out) {
-  return estimateAt(m.wind_dir_forecast, t, out);
+static bool estimateDirAt(const SkyModel& m, time_t t, double step, double& out) {
+  return estimateAt(m.wind_dir_forecast, t, step, out);
 }
-static bool estimateGustAt(const SkyModel& m, time_t t, double& out) {
-  return estimateAt(m.wind_gust_forecast, t, out);
+static bool estimateGustAt(const SkyModel& m, time_t t, double step, double& out) {
+  return estimateAt(m.wind_gust_forecast, t, step, out);
 }
 
 static inline float hueFromDir(float dir) {
@@ -85,7 +91,7 @@ WindView::WindView()
   DEBUG_PRINTLN("SkyStrip: WV::CTOR");
 }
 
-void WindView::view(time_t now, SkyModel const & model) {
+void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
   if (segId_ == DEFAULT_SEG_ID) return;
   if (model.wind_speed_forecast.empty()) return;
   if (segId_ < 0 || segId_ >= strip.getMaxSegments()) return;
@@ -103,9 +109,9 @@ void WindView::view(time_t now, SkyModel const & model) {
   for (uint16_t i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
     double spd, dir, gst;
-    if (!estimateSpeedAt(model, t, spd)) continue;
-    if (!estimateDirAt(model, t, dir)) continue;
-    if (!estimateGustAt(model, t, gst)) gst = spd;
+    if (!estimateSpeedAt(model, t, step, spd)) continue;
+    if (!estimateDirAt(model, t, step, dir)) continue;
+    if (!estimateGustAt(model, t, step, gst)) gst = spd;
     float hue = hueFromDir((float)dir);
     float sat = satFromGustDiff((float)spd, (float)gst);
     float val = clamp01(float(std::max(spd, gst)) / 50.f);

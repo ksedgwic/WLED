@@ -17,6 +17,7 @@ enum class SkyStripState {
 class SkyStrip : public Usermod {
 private:
   bool enabled_ = false;
+  int16_t dbgPixelIndex_ = -1; // if >=0 show periodic debugging for that pixel
   SkyStripState state_ = SkyStripState::Initial;
   uint32_t safeToStart_ = 0;
   uint32_t lastLoop_ = 0;
