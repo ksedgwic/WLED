@@ -11,7 +11,7 @@ public:
   ~TemperatureView() override = default;
 
   // IDataViewT<SkyModel>
-  void view(time_t now, SkyModel const & model) override;
+  void view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) override;
   std::string name() const override { return "TV"; }
 
   // IConfigurable

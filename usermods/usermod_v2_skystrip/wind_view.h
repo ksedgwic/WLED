@@ -10,7 +10,7 @@ public:
   WindView();
   ~WindView() override = default;
 
-  void view(time_t now, SkyModel const & model) override;
+  void view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) override;
   std::string name() const override { return "WV"; }
 
   void addToConfig(JsonObject& subtree) override;

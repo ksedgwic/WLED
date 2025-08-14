@@ -43,7 +43,7 @@ public:
   virtual ~IDataViewT() = default;
 
   /// Render the model to output (LEDs, serial, etc.)
-  virtual void view(std::time_t now, const ModelType& model) = 0;
+  virtual void view(std::time_t now, const ModelType& model, int16_t dbgPixelIndex) = 0;
 
   /// Identify the view (optional)
   virtual std::string name() const = 0;

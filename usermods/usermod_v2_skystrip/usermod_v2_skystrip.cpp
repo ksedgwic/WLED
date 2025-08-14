@@ -15,6 +15,7 @@
 
 const char CFG_NAME[] = "SkyStrip";
 const char CFG_ENABLED[] = "Enabled";
+const char CFG_DBG_PIXEL_INDEX[] = "DebugPixelIndex";
 
 static SkyStrip skystrip_usermod;
 REGISTER_USERMOD(skystrip_usermod);
@@ -116,7 +117,7 @@ void SkyStrip::handleOverlayDraw() {
     // this happens a hundred times a second
   time_t now = time_util::time_now_utc();
   for (auto &view : views_) {
-    view->view(now, *model_);
+    view->view(now, *model_, dbgPixelIndex_);
   }
 }
 
@@ -126,6 +127,7 @@ void SkyStrip::addToConfig(JsonObject& root) {
 
   // write our state
   top[FPSTR(CFG_ENABLED)] = enabled_;
+  top[FPSTR(CFG_DBG_PIXEL_INDEX)] = dbgPixelIndex_;
 
   // write the sources
   for (auto& src : sources_) {
@@ -153,6 +155,7 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
 
   // read our state
   ok &= getJsonValue(top[FPSTR(CFG_ENABLED)], enabled_, false);
+  ok &= getJsonValue(top[FPSTR(CFG_DBG_PIXEL_INDEX)], dbgPixelIndex_, -1);
 
   // read the sources
   for (auto& src : sources_) {

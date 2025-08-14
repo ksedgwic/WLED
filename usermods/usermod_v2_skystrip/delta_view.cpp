@@ -1,8 +1,10 @@
+#include <algorithm>
+#include <cmath>
+
 #include "delta_view.h"
 #include "skymodel.h"
 #include "wled.h"
-#include <algorithm>
-#include <cmath>
+#include "time_util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
@@ -12,11 +14,17 @@ template<typename T> static inline T clamp01(T v) {
   return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
 }
 
+const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
 template<class Series>
-static bool estimateAt(const Series& v, time_t t, double& out) {
+static bool estimateAt(const Series& v, time_t t, double step, double& out) {
   if (v.empty()) return false;
-  if (t <= v.front().tstamp) return false;
-  if (t >= v.back().tstamp)  return false;
+  // if it's too far away we didn't find estimate
+  if (t < v.front().tstamp - GRACE_SEC) return false;
+  if (t > v.back().tstamp  + GRACE_SEC) return false;
+  // just off the end uses end value
+  if (t <= v.front().tstamp) { out = v.front().value; return true; }
+  if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
+  // otherwise interpolate
   for (size_t i = 1; i < v.size(); ++i) {
     if (t <= v[i].tstamp) {
       const auto& a = v[i-1]; const auto& b = v[i];
@@ -111,7 +119,7 @@ DeltaView::DeltaView()
   DEBUG_PRINTLN("SkyStrip: DV::CTOR");
 }
 
-void DeltaView::view(time_t now, SkyModel const & model) {
+void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
   if (segId_ == DEFAULT_SEG_ID) return;
   if (model.temperature_forecast.empty()) return;
   if (segId_ < 0 || segId_ >= strip.getMaxSegments()) return;
@@ -129,11 +137,35 @@ void DeltaView::view(time_t now, SkyModel const & model) {
 
   for (uint16_t i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
+    int idx = seg.reverse ? (end - i) : (start + i);
 
     double tempNow, tempPrev;
-    if (!estimateAt(model.temperature_forecast, t, tempNow) ||
-        !estimateAt(model.temperature_forecast, t - day, tempPrev)) {
-      int idx = seg.reverse ? (end - i) : (start + i);
+    bool foundTempNow = estimateAt(model.temperature_forecast, t, step, tempNow);
+    bool foundTempPrev = estimateAt(model.temperature_forecast, t - day, step, tempPrev);
+
+    if (dbgPixelIndex >= 0) {
+      static time_t lastDebug0 = 0;
+      if (now - lastDebug0 > 30 && i == dbgPixelIndex) {
+        char tmbuf0[20];
+        time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t - day);
+        char tmbuf1[20];
+        time_util::fmt_local(tmbuf1, sizeof(tmbuf1), t);
+        DEBUG_PRINTF("SkyStrip: DV: i=%u timePrev=%s timeNow=%s\n",
+                     i, tmbuf0, tmbuf1);
+        lastDebug0 = now;
+      }
+    }
+
+    if (!foundTempNow || !foundTempPrev) {
+    if (dbgPixelIndex >= 0) {
+        static time_t lastDebug = 0;
+        if (now - lastDebug > 30 && i == dbgPixelIndex) {
+          DEBUG_PRINTF("SkyStrip: DV: i=%u foundTempPrev=%d foundTempNow=%d\n",
+                       i, foundTempPrev, foundTempNow);
+          lastDebug = now;
+        }
+      }
+
       strip.setPixelColor(idx, 0);
       continue;
     }
@@ -142,8 +174,8 @@ void DeltaView::view(time_t now, SkyModel const & model) {
     double dewNow, dewPrev;
     float sat = 1.0f;
     float spreadDelta = 0.f;
-    if (estimateAt(model.dew_point_forecast, t, dewNow) &&
-        estimateAt(model.dew_point_forecast, t - day, dewPrev)) {
+    if (estimateAt(model.dew_point_forecast, t, step, dewNow) &&
+        estimateAt(model.dew_point_forecast, t - day, step, dewPrev)) {
       float spreadNow  = float(tempNow - dewNow);
       float spreadPrev = float(tempPrev - dewPrev);
       spreadDelta = spreadNow - spreadPrev;
@@ -155,7 +187,15 @@ void DeltaView::view(time_t now, SkyModel const & model) {
     col = applySaturation(col, sat);
     col = applyIntensity(col, inten);
 
-    int idx = seg.reverse ? (end - i) : (start + i);
+    if (dbgPixelIndex >= 0) {
+      static time_t lastDebug = 0;
+      if (now - lastDebug > 30 && i == dbgPixelIndex) {
+        DEBUG_PRINTF("SkyStrip: DV: i=%u                                                    T0=%.1fF T1=%.1fF D0=%.1fF D1=%.1fF sat=%.2f col=%08x\n",
+                     i, tempPrev, tempNow, dewPrev, dewNow, sat, (unsigned)col);
+        lastDebug = now;
+      }
+    }
+
     strip.setPixelColor(idx, col);
   }
 }
