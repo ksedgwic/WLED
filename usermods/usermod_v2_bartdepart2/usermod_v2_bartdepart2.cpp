@@ -6,9 +6,9 @@
 #include "interfaces.h"
 #include "util.h"
 
-#include "bart_model.h"
-#include "bart_depart_source.h"
-#include "bart_depart_view.h"
+#include "bart_station_model.h"
+#include "legacy_bart_source.h"
+#include "platform_view.h"
 
 const char CFG_NAME[] = "BartDepart2";
 const char CFG_ENABLED[] = "Enabled";
@@ -20,9 +20,12 @@ REGISTER_USERMOD(bartdepart2_usermod);
 const time_t SAFETY_DELAY_MSECS = 10 * 1000;
 
 BartDepart2::BartDepart2() {
-  sources_.push_back(::make_unique<BartDepartSource>());
-  model_ = ::make_unique<BartModel>();
-  views_.push_back(::make_unique<BartDepartView>());
+  sources_.push_back(::make_unique<LegacyBartSource>());
+  model_ = ::make_unique<BartStationModel>();
+  views_.push_back(::make_unique<PlatformView>("1", 1));
+  views_.push_back(::make_unique<PlatformView>("2", 2));
+  views_.push_back(::make_unique<PlatformView>("3", 3));
+  views_.push_back(::make_unique<PlatformView>("4", 4));
 }
 
 void BartDepart2::setup() {

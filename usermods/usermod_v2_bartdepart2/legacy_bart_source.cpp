@@ -1,11 +1,11 @@
-#include "bart_depart_source.h"
+#include "legacy_bart_source.h"
 #include "util.h"
 
-BartDepartSource::BartDepartSource() {
+LegacyBartSource::LegacyBartSource() {
   client_.setInsecure();
 }
 
-void BartDepartSource::reload(std::time_t now) {
+void LegacyBartSource::reload(std::time_t now) {
   nextFetch_ = now;
   backoffMult_ = 1;
 }
@@ -17,7 +17,7 @@ static String composeUrl(const String& base, const String& key, const String& st
   return url;
 }
 
-std::unique_ptr<BartModel> BartDepartSource::fetch(std::time_t now) {
+std::unique_ptr<BartStationModel> LegacyBartSource::fetch(std::time_t now) {
   if (now == 0 || now < nextFetch_) return nullptr;
 
   String url = composeUrl(apiBase_, apiKey_, apiStation_);
@@ -48,7 +48,7 @@ std::unique_ptr<BartModel> BartDepartSource::fetch(std::time_t now) {
     return nullptr;
   }
 
-  std::unique_ptr<BartModel> model(new BartModel());
+  std::unique_ptr<BartStationModel> model(new BartStationModel());
   for (const String& pid : platformIds()) {
     if (pid.isEmpty()) continue;
     TrainPlatformModel tp(pid);
@@ -61,27 +61,27 @@ std::unique_ptr<BartModel> BartDepartSource::fetch(std::time_t now) {
   return model;
 }
 
-void BartDepartSource::addToConfig(JsonObject& root) {
+void LegacyBartSource::addToConfig(JsonObject& root) {
   root["UpdateSecs"] = updateSecs_;
   root["ApiBase"] = apiBase_;
   root["ApiKey"] = apiKey_;
   root["ApiStation"] = apiStation_;
-  root["Segment1Platform"] = seg1PlatformId_;
-  root["Segment2Platform"] = seg2PlatformId_;
-  root["Segment3Platform"] = seg3PlatformId_;
-  root["Segment4Platform"] = seg4PlatformId_;
+  root["Platform1"] = platform1Id_;
+  root["Platform2"] = platform2Id_;
+  root["Platform3"] = platform3Id_;
+  root["Platform4"] = platform4Id_;
 }
 
-bool BartDepartSource::readFromConfig(JsonObject& root, bool startup_complete, bool& invalidate_history) {
+bool LegacyBartSource::readFromConfig(JsonObject& root, bool startup_complete, bool& invalidate_history) {
   bool ok = true;
   ok &= getJsonValue(root["UpdateSecs"], updateSecs_, 60);
   ok &= getJsonValue(root["ApiBase"], apiBase_, apiBase_);
   ok &= getJsonValue(root["ApiKey"], apiKey_, apiKey_);
   ok &= getJsonValue(root["ApiStation"], apiStation_, apiStation_);
-  ok &= getJsonValue(root["Segment1Platform"], seg1PlatformId_, seg1PlatformId_);
-  ok &= getJsonValue(root["Segment2Platform"], seg2PlatformId_, seg2PlatformId_);
-  ok &= getJsonValue(root["Segment3Platform"], seg3PlatformId_, seg3PlatformId_);
-  ok &= getJsonValue(root["Segment4Platform"], seg4PlatformId_, seg4PlatformId_);
+  ok &= getJsonValue(root["Platform1"], platform1Id_, platform1Id_);
+  ok &= getJsonValue(root["Platform2"], platform2Id_, platform2Id_);
+  ok &= getJsonValue(root["Platform3"], platform3Id_, platform3Id_);
+  ok &= getJsonValue(root["Platform4"], platform4Id_, platform4Id_);
   invalidate_history = true;
   return ok;
 }

@@ -6,9 +6,9 @@
 
 #define BARTDEPART2_VERSION "0.0.1"
 
-class BartModel;
-class BartDepartSource;
-class BartDepartView;
+class BartStationModel;
+class LegacyBartSource;
+class PlatformView;
 
 enum class BartDepart2State {
   Initial,
@@ -26,9 +26,9 @@ private:
   bool lastOff_ = false;
   bool lastEnabled_ = false;
 
-  std::vector<std::unique_ptr<IDataSourceT<BartModel>>> sources_;
-  std::unique_ptr<BartModel> model_;
-  std::vector<std::unique_ptr<IDataViewT<BartModel>>> views_;
+  std::vector<std::unique_ptr<IDataSourceT<BartStationModel>>> sources_;
+  std::unique_ptr<BartStationModel> model_;
+  std::vector<std::unique_ptr<IDataViewT<BartStationModel>>> views_;
 
 public:
   BartDepart2();
