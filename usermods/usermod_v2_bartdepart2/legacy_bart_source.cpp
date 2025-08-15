@@ -51,7 +51,7 @@ std::unique_ptr<BartStationModel> LegacyBartSource::fetch(std::time_t now) {
   std::unique_ptr<BartStationModel> model(new BartStationModel());
   for (const String& pid : platformIds()) {
     if (pid.isEmpty()) continue;
-    TrainPlatformModel tp(pid);
+    BartStationModel::Platform tp(pid);
     tp.update(root);
     model->platforms.push_back(std::move(tp));
   }

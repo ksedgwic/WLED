@@ -1,16 +1,159 @@
 #pragma once
 
-#include <vector>
+#include "wled.h"
+
 #include <algorithm>
-#include "train_platform_model.h"
+#include <deque>
+#include <vector>
+#include <ctime>
+#include <cstdio>
+#include <cstring>
+
+#include "train_color.h"
+#include "util.h"
 
 struct BartStationModel {
-  std::vector<TrainPlatformModel> platforms;
+  struct Platform {
+    struct ETD {
+      time_t     estDep;
+      TrainColor color;
+    };
+    struct ETDBatch {
+      time_t           apiTs;
+      time_t           ourTs;
+      std::vector<ETD> etds;
+    };
+
+    explicit Platform(const String& platformId)
+      : platformId_(platformId) {}
+
+    void update(const JsonObject& root) {
+      if (platformId_.isEmpty()) return;
+
+      ETDBatch batch;
+      const char* dateStr = root["date"] | "";
+      const char* timeStr = root["time"] | "";
+      batch.apiTs = parseHeaderTimestamp(dateStr, timeStr);
+      batch.ourTs = util::time_now();
+
+      if (root["station"].is<JsonArray>()) {
+        for (JsonObject station : root["station"].as<JsonArray>()) {
+          if (!station["etd"].is<JsonArray>()) continue;
+          for (JsonObject etd : station["etd"].as<JsonArray>()) {
+            if (!etd["estimate"].is<JsonArray>()) continue;
+            for (JsonObject est : etd["estimate"].as<JsonArray>()) {
+              if (String(est["platform"] | "0") != platformId_) continue;
+              int mins = atoi(est["minutes"] | "0");
+              time_t dep = batch.apiTs + mins * 60;
+              TrainColor col = parseTrainColor(est["color"] | "");
+              batch.etds.push_back(ETD{dep, col});
+            }
+          }
+        }
+      }
+
+      std::sort(batch.etds.begin(), batch.etds.end(),
+        [](const ETD& a, const ETD& b){ return a.estDep < b.estDep; });
+
+      history_.push_back(std::move(batch));
+      while (history_.size() > 5) {
+        history_.pop_front();
+      }
+
+      DEBUG_PRINTF("BartDepart::update platform %s: %s\n",
+                   platformId_.c_str(), toString().c_str());
+    }
+
+    void merge(const Platform& other) {
+      for (auto const& b : other.history_) {
+        history_.push_back(b);
+        if (history_.size() > 5) history_.pop_front();
+      }
+    }
+
+    time_t oldest() const {
+      if (history_.empty()) return 0;
+      return history_.front().ourTs;
+    }
+
+    const String& platformId() const { return platformId_; }
+    const std::deque<ETDBatch>& history() const { return history_; }
+
+    String toString() const {
+      if (history_.empty()) return String();
+
+      const ETDBatch& batch = history_.back();
+      const auto& etds = batch.etds;
+      if (etds.empty()) return String();
+
+      time_t ourTs = batch.ourTs;
+      struct tm tmNow = *localtime(&ourTs);
+      char nowBuf[16];
+      snprintf(nowBuf, sizeof(nowBuf),
+               "%02d:%02d:%02d",
+               tmNow.tm_hour,
+               tmNow.tm_min,
+               tmNow.tm_sec);
+
+      int lagSecs = ourTs - batch.apiTs;
+
+      String out;
+      out += nowBuf;
+      out += ": lag ";
+      out += lagSecs;
+      out += ":";
+
+      for (const auto& e : etds) {
+        out += " ";
+        int diff = e.estDep - ourTs;
+        out += diff / 60;
+        out += " (";
+
+        time_t depTs = e.estDep;
+        struct tm tmDep = *localtime(&depTs);
+        char depBuf[16];
+        snprintf(depBuf, sizeof(depBuf),
+                 "%02d:%02d:%02d",
+                 tmDep.tm_hour,
+                 tmDep.tm_min,
+                 tmDep.tm_sec);
+        out += depBuf;
+        out += ":";
+        out += ::toString(e.color);
+        out += ")";
+      }
+      return out;
+    }
+
+   private:
+    String platformId_;
+    std::deque<ETDBatch> history_;
+
+    time_t parseHeaderTimestamp(const char* dateStr, const char* timeStr) const {
+      int month=0, day=0, year=0;
+      int hour=0, min=0, sec=0;
+      char ampm[3] = {0};
+      sscanf(dateStr, "%d/%d/%d", &month, &day, &year);
+      sscanf(timeStr, "%d:%d:%d %2s", &hour, &min, &sec, ampm);
+      if (strcasecmp(ampm, "PM") == 0 && hour < 12) hour += 12;
+      if (strcasecmp(ampm, "AM") == 0 && hour == 12) hour = 0;
+      struct tm tm{};
+      tm.tm_year = year - 1900;
+      tm.tm_mon  = month - 1;
+      tm.tm_mday = day;
+      tm.tm_hour = hour;
+      tm.tm_min  = min;
+      tm.tm_sec  = sec;
+      return mktime(&tm);
+    }
+  };
+
+  std::vector<Platform> platforms;
 
   void update(std::time_t now, BartStationModel&& delta) {
     for (auto &p : delta.platforms) {
       auto it = std::find_if(platforms.begin(), platforms.end(),
-        [&](const TrainPlatformModel& x){ return x.platformId() == p.platformId(); });
+        [&](const Platform& x){ return x.platformId() == p.platformId(); });
       if (it != platforms.end()) {
         it->merge(p);
       } else {
