@@ -22,10 +22,10 @@ const time_t SAFETY_DELAY_MSECS = 10 * 1000;
 BartDepart2::BartDepart2() {
   sources_.push_back(::make_unique<LegacyBartSource>());
   model_ = ::make_unique<BartStationModel>();
-  views_.push_back(::make_unique<PlatformView>("1", 1));
-  views_.push_back(::make_unique<PlatformView>("2", 2));
-  views_.push_back(::make_unique<PlatformView>("3", 3));
-  views_.push_back(::make_unique<PlatformView>("4", 4));
+  views_.push_back(::make_unique<PlatformView>("1"));
+  views_.push_back(::make_unique<PlatformView>("2"));
+  views_.push_back(::make_unique<PlatformView>("3"));
+  views_.push_back(::make_unique<PlatformView>("4"));
 }
 
 void BartDepart2::setup() {

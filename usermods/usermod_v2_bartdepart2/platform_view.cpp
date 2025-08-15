@@ -15,6 +15,7 @@ static CRGB colorFromTrainColor(TrainColor tc) {
 }
 
 void PlatformView::view(std::time_t now, const BartStationModel& model, int16_t dbgPixelIndex) {
+  if (segmentId_ == -1) return;
   for (const auto& platform : model.platforms) {
     if (platform.platformId() != platformId_) continue;
 

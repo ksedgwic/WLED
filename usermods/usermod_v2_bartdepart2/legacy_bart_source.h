@@ -18,10 +18,6 @@ private:
   String apiBase_ = "https://api.bart.gov/api/etd.aspx?cmd=etd&json=y";
   String apiKey_ = "MW9S-E7SL-26DU-VV8V";
   String apiStation_ = "19th";
-  String platform1Id_ = "1";
-  String platform2Id_;
-  String platform3Id_;
-  String platform4Id_;
   time_t nextFetch_ = 0;
   uint8_t backoffMult_ = 1;
   WiFiClientSecure client_;
@@ -39,7 +35,5 @@ public:
   const char* configKey() const override { return "LegacyBartSource"; }
 
   uint16_t updateSecs() const { return updateSecs_; }
-  std::vector<String> platformIds() const {
-    return {platform1Id_, platform2Id_, platform3Id_, platform4Id_};
-  }
+  std::vector<String> platformIds() const { return { "1", "2", "3", "4" }; }
 };
