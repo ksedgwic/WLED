@@ -4,10 +4,10 @@
 #include <algorithm>
 #include "train_platform_model.h"
 
-struct BartModel {
+struct BartStationModel {
   std::vector<TrainPlatformModel> platforms;
 
-  void update(std::time_t now, BartModel&& delta) {
+  void update(std::time_t now, BartStationModel&& delta) {
     for (auto &p : delta.platforms) {
       auto it = std::find_if(platforms.begin(), platforms.end(),
         [&](const TrainPlatformModel& x){ return x.platformId() == p.platformId(); });
