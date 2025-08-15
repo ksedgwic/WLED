@@ -42,53 +42,47 @@ void PlatformView::view(std::time_t now, const BartStationModel& model, int16_t 
     int base  = seg.reverse ? end : start;
     int dir   = seg.reverse ? -1  : +1;
 
-    for (auto &e : batch.etds) {
-      float diffMin = float(updateSecs_ + e.estDep - now) / 60.0f;
-      if (diffMin < 0 || diffMin >= len) continue;
+    auto brightness = [&](uint32_t c) {
+      return (uint16_t)(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF));
+    };
 
-      int   idx  = int(floor(diffMin));
-      float frac = diffMin - float(idx);
-      uint8_t b1 = uint8_t((1.0f - frac) * 255);
-      uint8_t b2 = uint8_t(frac * 255);
+    for (int i = 0; i < len; ++i) {
+      uint32_t bestColor = 0;
+      uint16_t bestB = 0;
 
-      CRGB col = colorFromTrainColor(e.color);
+      for (auto &e : batch.etds) {
+        float diffMin = float(updateSecs_ + e.estDep - now) / 60.0f;
+        if (diffMin < 0 || diffMin >= len) continue;
 
-      int pos1 = base + dir*idx;
-      int pos2 = base + dir*(idx+1);
+        int   idx  = int(floor(diffMin));
+        float frac = diffMin - float(idx);
 
-      auto brightness = [&](uint32_t c) {
-        return (uint16_t)(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF));
-      };
+        uint8_t b = 0;
+        if (i == idx) {
+          b = uint8_t((1.0f - frac) * 255);
+        } else if (i == idx + 1) {
+          b = uint8_t(frac * 255);
+        } else {
+          continue;
+        }
 
-      if (pos1 >= start && pos1 <= end) {
-        uint32_t existing = strip.getPixelColor(pos1);
-        uint32_t newColor1 =
-          (((uint32_t)col.r * b1 / 255) << 16) |
-          (((uint32_t)col.g * b1 / 255) <<  8) |
-           ((uint32_t)col.b * b1 / 255);
+        CRGB col = colorFromTrainColor(e.color);
+        uint32_t newColor =
+          (((uint32_t)col.r * b / 255) << 16) |
+          (((uint32_t)col.g * b / 255) <<  8) |
+           ((uint32_t)col.b * b / 255);
 
-        uint16_t oldB = brightness(existing);
-        uint16_t newB = brightness(newColor1);
-
-        if ((preferFirst && (existing == 0 || newB > 2*oldB))
-            || (!preferFirst && newB * 2 >= oldB)) {
-          strip.setPixelColor(pos1, newColor1);
+        uint16_t newB = brightness(newColor);
+        if ((preferFirst && (bestColor == 0 || newB > 2*bestB))
+            || (!preferFirst && newB * 2 >= bestB)) {
+          bestColor = newColor;
+          bestB = newB;
         }
       }
 
-      if (pos2 >= start && pos2 <= end) {
-        uint32_t existing2 = strip.getPixelColor(pos2);
-        uint32_t newColor2 =
-          (((uint32_t)col.r * b2 / 255) << 16) |
-          (((uint32_t)col.g * b2 / 255) <<  8) |
-           ((uint32_t)col.b * b2 / 255);
-
-        uint16_t oldB2 = brightness(existing2);
-        uint16_t newB2 = brightness(newColor2);
-        if ((preferFirst && (existing2 == 0 || newB2 > 2*oldB2))
-            || (!preferFirst && newB2 * 2 >= oldB2)) {
-          strip.setPixelColor(pos2, newColor2);
-        }
+      if (bestColor != 0) {
+        int pos = base + dir * i;
+        strip.setPixelColor(pos, bestColor);
       }
     }
     break;
