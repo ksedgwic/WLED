@@ -4,38 +4,10 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include "time_util.h"
+#include "util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
-
-static inline double lerp(double a, double b, double t) { return a + (b - a) * t; }
-template<typename T> static inline T clamp01(T v) {
-  return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
-}
-
-const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
-template<class Series>
-static bool estimateAt(const Series& v, time_t t, double step, double& out) {
-  if (v.empty()) return false;
-  // if it's too far away we didn't find estimate
-  if (t < v.front().tstamp - GRACE_SEC) return false;
-  if (t > v.back().tstamp  + GRACE_SEC) return false;
-  // just off the end uses end value
-  if (t <= v.front().tstamp) { out = v.front().value; return true; }
-  if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
-  // otherwise interpolate
-  for (size_t i = 1; i < v.size(); ++i) {
-    if (t <= v[i].tstamp) {
-      const auto& a = v[i-1]; const auto& b = v[i];
-      const double span = double(b.tstamp - a.tstamp);
-      const double u = clamp01(span > 0 ? double(t - a.tstamp) / span : 0.0);
-      out = lerp(a.value, b.value, u);
-      return true;
-    }
-  }
-  return false;
-}
 
 static bool isDay(const SkyModel& m, time_t t) {
   const time_t MAXTT = std::numeric_limits<time_t>::max();
@@ -49,23 +21,6 @@ static bool isDay(const SkyModel& m, time_t t) {
   return t >= sr && t < ss;
 }
 
-static uint32_t hsv2rgb(float h, float s, float v) {
-  float c = v * s;
-  float hh = h / 60.f;
-  float x = c * (1.f - fabsf(fmodf(hh, 2.f) - 1.f));
-  float r1, g1, b1;
-  if (hh < 1.f)      { r1 = c; g1 = x; b1 = 0.f; }
-  else if (hh < 2.f) { r1 = x; g1 = c; b1 = 0.f; }
-  else if (hh < 3.f) { r1 = 0.f; g1 = c; b1 = x; }
-  else if (hh < 4.f) { r1 = 0.f; g1 = x; b1 = c; }
-  else if (hh < 5.f) { r1 = x; g1 = 0.f; b1 = c; }
-  else               { r1 = c; g1 = 0.f; b1 = x; }
-  float m = v - c;
-  uint8_t r = uint8_t(lrintf((r1 + m) * 255.f));
-  uint8_t g = uint8_t(lrintf((g1 + m) * 255.f));
-  uint8_t b = uint8_t(lrintf((b1 + m) * 255.f));
-  return RGBW32(r, g, b, 0);
-}
 
 CloudView::CloudView()
   : segId_(DEFAULT_SEG_ID) {
@@ -93,7 +48,7 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
   constexpr time_t DAY = 24 * 60 * 60;
   const time_t MAXTT = std::numeric_limits<time_t>::max();
 
-  long offset = time_util::current_offset();
+  long offset = util::current_offset();
 
   bool useSunrise = (sunrise != 0 && sunrise != MAXTT);
   bool useSunset  = (sunset  != 0 && sunset  != MAXTT);
@@ -129,27 +84,27 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
 
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
-    double clouds, precipTypeVal, precipProb;
-    if (!estimateAt(model.cloud_cover_forecast, t, step, clouds)) continue;
-    if (!estimateAt(model.precip_type_forecast, t, step, precipTypeVal)) precipTypeVal = 0.0;
-    if (!estimateAt(model.precip_prob_forecast, t, step, precipProb)) precipProb = 0.0;
+      double clouds, precipTypeVal, precipProb;
+      if (!util::estimateCloudAt(model, t, step, clouds)) continue;
+      if (!util::estimatePrecipTypeAt(model, t, step, precipTypeVal)) precipTypeVal = 0.0;
+      if (!util::estimatePrecipProbAt(model, t, step, precipProb)) precipProb = 0.0;
 
-    float clouds01 = clamp01(float(clouds / 100.0));
+    float clouds01 = util::clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
 
     uint32_t col = 0;
     if (isMarker(t)) {
       // always put the sunrise sunset markers in
-      col = hsv2rgb(kMarkerHue, kMarkerSat, kMarkerVal);
+      col = util::hsv2rgb(kMarkerHue, kMarkerSat, kMarkerVal);
     } else if (p != 0 && precipProb > 0.0) {
       // precipitation has next priority: rain=blue, snow=white, mixed=cyan-ish
       float ph, ps;
       if (p == 1)      { ph = 210.f; ps = 1.0f; }
       else if (p == 2) { ph = 0.f;   ps = 0.0f; }
       else             { ph = 180.f; ps = 0.5f; }
-      float pv = clamp01(float(precipProb));
+      float pv = util::clamp01(float(precipProb));
       pv = 0.3f + 0.7f * pv;
-      col = hsv2rgb(ph, ps, pv);
+      col = util::hsv2rgb(ph, ps, pv);
     } else {
       // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
@@ -162,13 +117,13 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
       float val = clouds01 * vmax;
       float hue = daytime ? kDayHue : kNightHue;
       float sat = daytime ? kDaySat : kNightSat;
-      col = hsv2rgb(hue, sat, val);
+      col = util::hsv2rgb(hue, sat, val);
 
       if (dbgPixelIndex >= 0) {
         static time_t lastDebug = 0;
         if (now - lastDebug > 30 && i == dbgPixelIndex) {
           char tmbuf0[20];
-          time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
+          util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
           DEBUG_PRINTF("SkyStrip: %s: i=%u timeNow=%s day=%d clouds01=%.2f sat=%.2f col=%08x\n",
                        name().c_str(), i, tmbuf0, daytime, clouds01, sat, (unsigned)col);
           lastDebug = now;

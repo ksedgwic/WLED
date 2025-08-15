@@ -1,6 +1,6 @@
 #include "temperature_view.h"
 #include "skymodel.h"
-#include "time_util.h"
+#include "util.h"
 #include "wled.h"          // Segment, strip, RGBW32
 #include <algorithm>
 #include <cmath>
@@ -13,70 +13,9 @@ static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 //
 const char CFG_SEG_ID[] = "SegmentId";
 
-static inline double lerp(double a, double b, double t) { return a + (b - a) * t; }
-template<typename T> static inline T clamp01(T v) {
-  return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
-}
-
-const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
-template<class Series>
-static bool estimateAt(const Series& v, time_t t, double step, double& out) {
-  if (v.empty()) return false;
-  // if it's too far away we didn't find estimate
-  if (t < v.front().tstamp - GRACE_SEC) return false;
-  if (t > v.back().tstamp  + GRACE_SEC) return false;
-  // just off the end uses end value
-  if (t <= v.front().tstamp) { out = v.front().value; return true; }
-  if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
-  // otherwise interpolate
-  for (size_t i = 1; i < v.size(); ++i) {
-    if (t <= v[i].tstamp) {
-      const auto& a = v[i-1]; const auto& b = v[i];
-      const double span = double(b.tstamp - a.tstamp);
-      const double u = clamp01(span > 0 ? double(t - a.tstamp) / span : 0.0);
-      out = lerp(a.value, b.value, u);
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool estimateTempAt(const SkyModel& m, time_t t, double step, double& outF)    {
-  return estimateAt(m.temperature_forecast, t, step, outF);
-}
-static bool estimateDewPtAt(const SkyModel& m, time_t t, double step, double& outFdp) {
-  return estimateAt(m.dew_point_forecast, t, step, outFdp);
-}
-
-// Assumes RGBW32 packs as (W<<24 | R<<16 | G<<8 | B).
 static inline uint8_t Rof(uint32_t c){ return (c >> 16) & 0xFF; }
 static inline uint8_t Gof(uint32_t c){ return (c >>  8) & 0xFF; }
 static inline uint8_t Bof(uint32_t c){ return (c      ) & 0xFF; }
-
-// Scale saturation by mixing toward luma (keeps perceived brightness stable).
-static inline uint32_t applySaturation(uint32_t col, float sat) {
-  // sat expected in [0,1]; 0=muggy/gray, 1=full color
-  if (sat < 0.f) sat = 0.f; else if (sat > 1.f) sat = 1.f;
-
-  const float r = float((col >> 16) & 0xFF);
-  const float g = float((col >>  8) & 0xFF);
-  const float b = float((col      ) & 0xFF);
-
-  // Rec.709 luma (linear-ish; good enough here)
-  const float y = 0.2627f*r + 0.6780f*g + 0.0593f*b;
-
-  auto mixc = [&](float c) {
-    float v = y + sat * (c - y);     // pull toward gray as sat↓
-    if (v < 0.f) v = 0.f;
-    if (v > 255.f) v = 255.f;
-    return v;
-  };
-
-  const uint8_t r2 = uint8_t(lrintf(mixc(r)));
-  const uint8_t g2 = uint8_t(lrintf(mixc(g)));
-  const uint8_t b2 = uint8_t(lrintf(mixc(b)));
-  return RGBW32(r2, g2, b2, 0);
-}
 
 // Apply a simple brightness scaling.
 // "val" expected in [0,1]; 1=no change, 0=black.
@@ -94,7 +33,7 @@ static inline float satFromDewSpreadF(float tempF, float dewF) {
   float dd = tempF - dewF; if (dd < 0.f) dd = 0.f;          // guard bad inputs
   constexpr float kMinSat    = 0.40f;                       // floor (muggy look)
   constexpr float kMaxSpread = 25.0f;                       // “very dry” cap
-  float u = clamp01(dd / kMaxSpread);
+  float u = util::clamp01(dd / kMaxSpread);
   float eased = u*u*(3.f - 2.f*u);                          // smoothstep
   return kMinSat + (1.f - kMinSat) * eased;
 }
@@ -119,9 +58,9 @@ static uint32_t colorForTempF(double f) {
       const auto& A = kStopsF[i-1];
       const auto& B = kStopsF[i];
       const double u = (f - A.f) / (B.f - A.f);
-      const uint8_t r = uint8_t(std::lround(lerp(A.r, B.r, u)));
-      const uint8_t g = uint8_t(std::lround(lerp(A.g, B.g, u)));
-      const uint8_t b = uint8_t(std::lround(lerp(A.b, B.b, u)));
+      const uint8_t r = uint8_t(std::lround(util::lerp(A.r, B.r, u)));
+      const uint8_t g = uint8_t(std::lround(util::lerp(A.g, B.g, u)));
+      const uint8_t b = uint8_t(std::lround(util::lerp(A.b, B.b, u)));
       return RGBW32(r,g,b,0);
     }
   }
@@ -149,7 +88,7 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
   constexpr double kHorizonSec = 48.0 * 3600.0;
   const double step = (len > 1) ? (kHorizonSec / double(len - 1)) : 0.0;
   constexpr time_t DAY = 24 * 60 * 60;
-  const long tzOffset = time_util::current_offset();
+  const long tzOffset = util::current_offset();
 
   // Returns [0,1] marker weight based on proximity to midnight/noon boundaries
   // in local time.
@@ -172,13 +111,13 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
     double dewF = 0.f;
     uint32_t col = 0;
     float sat = 1.0f;
-    if (estimateTempAt(model, t, step, tempF)) {
+    if (util::estimateTempAt(model, t, step, tempF)) {
       col = colorForTempF(tempF);
 
-      if (estimateDewPtAt(model, t, step, dewF)) {
+      if (util::estimateDewPtAt(model, t, step, dewF)) {
         sat = satFromDewSpreadF((float)tempF, (float)dewF);
       }
-      col = applySaturation(col, sat);
+      col = util::applySaturation(col, sat);
       col = applyBrightness(col, 0.7f);
     }
 
@@ -192,7 +131,7 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
       static time_t lastDebug = 0;
       if (now - lastDebug > 30 && i == dbgPixelIndex) {
         char tmbuf0[20];
-        time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
+        util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
         DEBUG_PRINTF("SkyStrip: TV: i=%u                      timeNow=%s                     T=%.1fF           D=%.1fF sat=%.2f col=%08x\n",
                      i, tmbuf0, tempF, dewF, sat, (unsigned)col);
         lastDebug = now;

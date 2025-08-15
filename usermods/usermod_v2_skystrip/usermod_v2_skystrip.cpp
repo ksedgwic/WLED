@@ -4,7 +4,7 @@
 
 #include "usermod_v2_skystrip.h"
 #include "interfaces.h"
-#include "time_util.h"
+#include "util.h"
 
 #include "skymodel.h"
 #include "open_weather_map_source.h"
@@ -77,7 +77,7 @@ void SkyStrip::loop() {
     edgeInit_    = true;
   }
 
-  time_t const now = time_util::time_now_utc();
+  time_t const now = util::time_now_utc();
 
   // defer a short bit after reboot
   if (state_ == SkyStripState::Setup) {
@@ -117,7 +117,7 @@ void SkyStrip::loop() {
 
 void SkyStrip::handleOverlayDraw() {
     // this happens a hundred times a second
-  time_t now = time_util::time_now_utc();
+  time_t now = util::time_now_utc();
   for (auto &view : views_) {
     view->view(now, *model_, dbgPixelIndex_);
   }
@@ -172,7 +172,7 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
   }
 
   if (invalidate_history) {
-    time_t const now = time_util::time_now_utc();
+    time_t const now = util::time_now_utc();
     model_->invalidate_history(now);
     if (startup_complete) reloadSources(now); // not safe during startup
   }
@@ -200,7 +200,7 @@ void SkyStrip::doneBooting() {
 
 void SkyStrip::reloadSources(std::time_t now) {
   char nowBuf[20];
-  time_util::fmt_local(nowBuf, sizeof(nowBuf), now);
+  util::fmt_local(nowBuf, sizeof(nowBuf), now);
   DEBUG_PRINTF("SkyStrip::ReloadSources at %s\n", nowBuf);
 
   for (auto &src : sources_) src->reload(now);

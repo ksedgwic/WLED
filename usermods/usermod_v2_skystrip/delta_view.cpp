@@ -4,61 +4,11 @@
 #include "delta_view.h"
 #include "skymodel.h"
 #include "wled.h"
-#include "time_util.h"
+#include "util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
 
-static inline double lerp(double a, double b, double t) { return a + (b - a) * t; }
-template<typename T> static inline T clamp01(T v) {
-  return v < T(0) ? T(0) : (v > T(1) ? T(1) : v);
-}
-
-const int GRACE_SEC = 60 * 60 * 3; // fencepost + slide
-template<class Series>
-static bool estimateAt(const Series& v, time_t t, double step, double& out) {
-  if (v.empty()) return false;
-  // if it's too far away we didn't find estimate
-  if (t < v.front().tstamp - GRACE_SEC) return false;
-  if (t > v.back().tstamp  + GRACE_SEC) return false;
-  // just off the end uses end value
-  if (t <= v.front().tstamp) { out = v.front().value; return true; }
-  if (t >= v.back().tstamp)  { out = v.back().value;  return true; }
-  // otherwise interpolate
-  for (size_t i = 1; i < v.size(); ++i) {
-    if (t <= v[i].tstamp) {
-      const auto& a = v[i-1]; const auto& b = v[i];
-      const double span = double(b.tstamp - a.tstamp);
-      const double u = clamp01(span > 0 ? double(t - a.tstamp) / span : 0.0);
-      out = lerp(a.value, b.value, u);
-      return true;
-    }
-  }
-  return false;
-}
-
-// Assumes RGBW32 packs as (W<<24 | R<<16 | G<<8 | B)
-static inline uint32_t applySaturation(uint32_t col, float sat) {
-  if (sat < 0.f) sat = 0.f; else if (sat > 1.f) sat = 1.f;
-
-  const float r = float((col >> 16) & 0xFF);
-  const float g = float((col >>  8) & 0xFF);
-  const float b = float((col      ) & 0xFF);
-
-  const float y = 0.2627f*r + 0.6780f*g + 0.0593f*b;
-
-  auto mixc = [&](float c) {
-    float v = y + sat * (c - y);
-    if (v < 0.f) v = 0.f;
-    if (v > 255.f) v = 255.f;
-    return v;
-  };
-
-  const uint8_t r2 = uint8_t(lrintf(mixc(r)));
-  const uint8_t g2 = uint8_t(lrintf(mixc(g)));
-  const uint8_t b2 = uint8_t(lrintf(mixc(b)));
-  return RGBW32(r2, g2, b2, 0);
-}
 
 static inline uint32_t applyIntensity(uint32_t col, float inten) {
   if (inten < 0.f) inten = 0.f; else if (inten > 1.f) inten = 1.f;
@@ -89,9 +39,9 @@ static uint32_t colorForDeltaF(double f) {
       const auto& A = kStopsF[i-1];
       const auto& B = kStopsF[i];
       const double u = (f - A.f) / (B.f - A.f);
-      const uint8_t r = uint8_t(std::lround(lerp(A.r, B.r, u)));
-      const uint8_t g = uint8_t(std::lround(lerp(A.g, B.g, u)));
-      const uint8_t b = uint8_t(std::lround(lerp(A.b, B.b, u)));
+      const uint8_t r = uint8_t(std::lround(util::lerp(A.r, B.r, u)));
+      const uint8_t g = uint8_t(std::lround(util::lerp(A.g, B.g, u)));
+      const uint8_t b = uint8_t(std::lround(util::lerp(A.b, B.b, u)));
       return RGBW32(r,g,b,0);
     }
   }
@@ -102,16 +52,16 @@ static uint32_t colorForDeltaF(double f) {
 static inline float satFromDewDiffDelta(float delta) {
   constexpr float kMinSat = 0.30f;
   constexpr float kMaxDelta = 15.0f; // +/-15F covers typical range
-  float u = clamp01((delta + kMaxDelta) / (2.f * kMaxDelta));
+  float u = util::clamp01((delta + kMaxDelta) / (2.f * kMaxDelta));
   return kMinSat + (1.f - kMinSat) * u;
 }
 
 static inline float intensityFromDeltas(double tempDelta, float humidDelta) {
   constexpr float kMaxTempDelta = 20.0f; // +/-20F covers intensity range
   constexpr float kMaxHumDelta  = 15.0f; // +/-15F covers typical humidity range
-  float uT = clamp01(float(std::fabs(tempDelta)) / kMaxTempDelta);
-  float uH = clamp01(std::fabs(humidDelta) / kMaxHumDelta);
-  return clamp01(std::sqrt(uT*uT + uH*uH));
+  float uT = util::clamp01(float(std::fabs(tempDelta)) / kMaxTempDelta);
+  float uH = util::clamp01(std::fabs(humidDelta) / kMaxHumDelta);
+  return util::clamp01(std::sqrt(uT*uT + uH*uH));
 }
 
 DeltaView::DeltaView()
@@ -140,16 +90,16 @@ void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
     int idx = seg.reverse ? (end - i) : (start + i);
 
     double tempNow, tempPrev;
-    bool foundTempNow = estimateAt(model.temperature_forecast, t, step, tempNow);
-    bool foundTempPrev = estimateAt(model.temperature_forecast, t - day, step, tempPrev);
+    bool foundTempNow = util::estimateAt(model.temperature_forecast, t, step, tempNow);
+    bool foundTempPrev = util::estimateAt(model.temperature_forecast, t - day, step, tempPrev);
 
     if (dbgPixelIndex >= 0) {
       static time_t lastDebug0 = 0;
       if (now - lastDebug0 > 30 && i == dbgPixelIndex) {
         char tmbuf0[20];
-        time_util::fmt_local(tmbuf0, sizeof(tmbuf0), t - day);
+        util::fmt_local(tmbuf0, sizeof(tmbuf0), t - day);
         char tmbuf1[20];
-        time_util::fmt_local(tmbuf1, sizeof(tmbuf1), t);
+        util::fmt_local(tmbuf1, sizeof(tmbuf1), t);
         DEBUG_PRINTF("SkyStrip: DV: i=%u timePrev=%s timeNow=%s\n",
                      i, tmbuf0, tmbuf1);
         lastDebug0 = now;
@@ -174,8 +124,8 @@ void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
     double dewNow, dewPrev;
     float sat = 1.0f;
     float spreadDelta = 0.f;
-    if (estimateAt(model.dew_point_forecast, t, step, dewNow) &&
-        estimateAt(model.dew_point_forecast, t - day, step, dewPrev)) {
+    if (util::estimateAt(model.dew_point_forecast, t, step, dewNow) &&
+        util::estimateAt(model.dew_point_forecast, t - day, step, dewPrev)) {
       float spreadNow  = float(tempNow - dewNow);
       float spreadPrev = float(tempPrev - dewPrev);
       spreadDelta = spreadNow - spreadPrev;
@@ -184,7 +134,7 @@ void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
 
     float inten = intensityFromDeltas(deltaT, spreadDelta);
     uint32_t col = colorForDeltaF(deltaT);
-    col = applySaturation(col, sat);
+    col = util::applySaturation(col, sat);
     col = applyIntensity(col, inten);
 
     if (dbgPixelIndex >= 0) {
