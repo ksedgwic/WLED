@@ -66,10 +66,6 @@ void LegacyBartSource::addToConfig(JsonObject& root) {
   root["ApiBase"] = apiBase_;
   root["ApiKey"] = apiKey_;
   root["ApiStation"] = apiStation_;
-  root["Platform1"] = platform1Id_;
-  root["Platform2"] = platform2Id_;
-  root["Platform3"] = platform3Id_;
-  root["Platform4"] = platform4Id_;
 }
 
 bool LegacyBartSource::readFromConfig(JsonObject& root, bool startup_complete, bool& invalidate_history) {
@@ -78,10 +74,6 @@ bool LegacyBartSource::readFromConfig(JsonObject& root, bool startup_complete, b
   ok &= getJsonValue(root["ApiBase"], apiBase_, apiBase_);
   ok &= getJsonValue(root["ApiKey"], apiKey_, apiKey_);
   ok &= getJsonValue(root["ApiStation"], apiStation_, apiStation_);
-  ok &= getJsonValue(root["Platform1"], platform1Id_, platform1Id_);
-  ok &= getJsonValue(root["Platform2"], platform2Id_, platform2Id_);
-  ok &= getJsonValue(root["Platform3"], platform3Id_, platform3Id_);
-  ok &= getJsonValue(root["Platform4"], platform4Id_, platform4Id_);
   invalidate_history = true;
   return ok;
 }

@@ -8,11 +8,11 @@ class PlatformView : public IDataViewT<BartStationModel> {
 private:
   uint16_t updateSecs_ = 60;
   String platformId_;
-  uint16_t segmentId_;
+  int16_t segmentId_ = -1;
   std::string configKey_;
 public:
-  PlatformView(const String& platformId, uint16_t segmentId)
-    : platformId_(platformId), segmentId_(segmentId),
+  PlatformView(const String& platformId)
+    : platformId_(platformId), segmentId_(-1),
       configKey_(std::string("PlatformView") + platformId.c_str()) {}
 
   void view(std::time_t now, const BartStationModel& model, int16_t dbgPixelIndex) override;
