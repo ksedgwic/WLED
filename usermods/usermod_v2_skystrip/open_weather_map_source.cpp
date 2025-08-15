@@ -2,7 +2,7 @@
 
 #include "open_weather_map_source.h"
 #include "skymodel.h"
-#include "time_util.h"
+#include "util.h"
 
 static constexpr const char* DEFAULT_API_BASE    =
   "https://api.openweathermap.org/data/3.0/onecall"

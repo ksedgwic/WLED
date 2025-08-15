@@ -4,7 +4,7 @@
 #include "wled.h"
 
 #include "skymodel.h"
-#include "time_util.h"
+#include "util.h"
 
 namespace {
   static constexpr time_t HISTORY_SEC = 25 * 60 * 60;  // keep an extra history point
@@ -129,7 +129,7 @@ static inline void emitSeriesMDHM(const std::function<void(const String&)> &emit
       if (line.length()) { emit(line); line = String(); line.reserve(256); }
       line += F("SkyModel: ");
     }
-    time_util::fmt_local(tb, sizeof(tb), dp.tstamp);
+    util::fmt_local(tb, sizeof(tb), dp.tstamp);
     snprintf(valbuf, sizeof(valbuf), "%6.2f", dp.value);
     line += F(" (");
     line += tb;
@@ -160,9 +160,9 @@ void SkyModel::emitDebug(time_t now, const std::function<void(const String&)> &e
   {
     char tb[20];
     String line;
-    time_util::fmt_local(tb, sizeof(tb), sunrise_);
+    util::fmt_local(tb, sizeof(tb), sunrise_);
     line  = F("SkyModel: sunrise "); line += tb; emit(line);
-    time_util::fmt_local(tb, sizeof(tb), sunset_);
+    util::fmt_local(tb, sizeof(tb), sunset_);
     line  = F("SkyModel: sunset ");  line += tb; emit(line);
   }
 }
