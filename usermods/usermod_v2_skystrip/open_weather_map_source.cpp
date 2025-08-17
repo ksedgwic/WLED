@@ -187,7 +187,7 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
 
 std::unique_ptr<SkyModel> OpenWeatherMapSource::checkhistory(time_t now, std::time_t oldestTstamp) {
   if (oldestTstamp == 0) return nullptr;
-  if ((now - lastHistFetch_) < 60) return nullptr;
+  if ((now - lastHistFetch_) < 15) return nullptr;
   lastHistFetch_ = now;
 
   static constexpr time_t HISTORY_SEC = 24 * 60 * 60;
