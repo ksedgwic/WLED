@@ -1,17 +1,71 @@
+#include <cmath>
+#include <cstring>
+#include <cctype>
+#include <cstdlib>
+
+#include "wled.h"
+
 #include "test_pattern_view.h"
 #include "skymodel.h"
-#include "wled.h"
-#include <cmath>
 #include "util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
-const char CFG_START_HUE[] = "StartHue";
-const char CFG_START_SAT[] = "StartSat";
-const char CFG_START_VAL[] = "StartVal";
-const char CFG_END_HUE[]   = "EndHue";
-const char CFG_END_SAT[]   = "EndSat";
-const char CFG_END_VAL[]   = "EndVal";
+// legacy individual HSV components
+const char CFG_START_HUE[] PROGMEM = "StartHue";
+const char CFG_START_SAT[] PROGMEM = "StartSat";
+const char CFG_START_VAL[] PROGMEM = "StartVal";
+const char CFG_END_HUE[]   PROGMEM = "EndHue";
+const char CFG_END_SAT[]   PROGMEM = "EndSat";
+const char CFG_END_VAL[]   PROGMEM = "EndVal";
+
+// combined HSV strings (hue 0-360, sat/val 0-100%)
+const char CFG_START_HSV[] PROGMEM = "StartHSV";
+const char CFG_END_HSV[]   PROGMEM = "EndHSV";
+
+namespace {
+
+void formatHSV(char* out, size_t len, float h, float s, float v) {
+  // store saturation/value as percentages for readability
+  snprintf(out, len, "H:%.0f S:%.0f V:%.0f", h, s * 100.f, v * 100.f);
+}
+
+bool parseHSV(const char* in, float& h, float& s, float& v) {
+  if (!in) return false;
+
+  char buf[64];
+  strncpy(buf, in, sizeof(buf));
+  buf[sizeof(buf)-1] = '\0';
+
+  float values[3] = {0.f, 0.f, 0.f};
+  bool found[3] = {false, false, false};
+  char* saveptr;
+  for (char* tok = strtok_r(buf, ", \t\r\n", &saveptr); tok;
+       tok = strtok_r(nullptr, ", \t\r\n", &saveptr)) {
+    char* sep = strpbrk(tok, "=:");
+    if (sep) {
+      char key = tolower((unsigned char)tok[0]);
+      float val = atof(sep + 1);
+      if (key == 'h') { values[0] = val; found[0] = true; }
+      else if (key == 's') { values[1] = val; found[1] = true; }
+      else if (key == 'v') { values[2] = val; found[2] = true; }
+    } else {
+      for (int i = 0; i < 3; ++i) {
+        if (!found[i]) { values[i] = atof(tok); found[i] = true; break; }
+      }
+    }
+  }
+
+  if (found[0] && found[1] && found[2]) {
+    h = values[0];
+    s = values[1] / 100.f;
+    v = values[2] / 100.f;
+    return true;
+  }
+  return false;
+}
+
+} // namespace
 
 
 TestPatternView::TestPatternView()
@@ -45,12 +99,12 @@ void TestPatternView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
 
 void TestPatternView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
-  subtree[FPSTR(CFG_START_HUE)] = startHue_;
-  subtree[FPSTR(CFG_START_SAT)] = startSat_;
-  subtree[FPSTR(CFG_START_VAL)] = startVal_;
-  subtree[FPSTR(CFG_END_HUE)] = endHue_;
-  subtree[FPSTR(CFG_END_SAT)] = endSat_;
-  subtree[FPSTR(CFG_END_VAL)] = endVal_;
+
+  char buf[32];
+  formatHSV(buf, sizeof(buf), startHue_, startSat_, startVal_);
+  subtree[FPSTR(CFG_START_HSV)] = buf;
+  formatHSV(buf, sizeof(buf), endHue_, endSat_, endVal_);
+  subtree[FPSTR(CFG_END_HSV)] = buf;
 }
 
 bool TestPatternView::readFromConfig(JsonObject& subtree,
@@ -58,11 +112,24 @@ bool TestPatternView::readFromConfig(JsonObject& subtree,
                                      bool& invalidate_history) {
   bool configComplete = !subtree.isNull();
   configComplete &= getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_START_HUE)], startHue_, 0.f);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_START_SAT)], startSat_, 0.f);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_START_VAL)], startVal_, 0.f);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_END_HUE)], endHue_, 0.f);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_END_SAT)], endSat_, 0.f);
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_END_VAL)], endVal_, 1.f);
+
+  bool parsed = false;
+  if (!subtree[FPSTR(CFG_START_HSV)].isNull()) {
+    parsed = parseHSV(subtree[FPSTR(CFG_START_HSV)], startHue_, startSat_, startVal_);
+    configComplete &= parsed;
+  } else {
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_START_HUE)], startHue_, 0.f);
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_START_SAT)], startSat_, 0.f);
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_START_VAL)], startVal_, 0.f);
+  }
+
+  if (!subtree[FPSTR(CFG_END_HSV)].isNull()) {
+    parsed = parseHSV(subtree[FPSTR(CFG_END_HSV)], endHue_, endSat_, endVal_);
+    configComplete &= parsed;
+  } else {
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_END_HUE)], endHue_, 0.f);
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_END_SAT)], endSat_, 0.f);
+    configComplete &= getJsonValue(subtree[FPSTR(CFG_END_VAL)], endVal_, 1.f);
+  }
   return configComplete;
 }
