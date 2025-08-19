@@ -107,6 +107,15 @@ void TestPatternView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_END_HSV)] = buf;
 }
 
+void TestPatternView::appendConfigData(Print& s) {
+  // Keep the hint INLINE (BEFORE the input = 4th arg):
+  s.print(F(
+    "addInfo('SkyStrip:TestPatternView:SegmentId',1,'',"
+    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+    ");"
+  ));
+}
+
 bool TestPatternView::readFromConfig(JsonObject& subtree,
                                      bool startup_complete,
                                      bool& invalidate_history) {

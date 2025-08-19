@@ -14,6 +14,7 @@ public:
   std::string name() const override { return "CV"; }
 
   void addToConfig(JsonObject& subtree) override;
+  void appendConfigData(Print& s) override;
   bool readFromConfig(JsonObject& subtree,
                       bool startup_complete,
                       bool& invalidate_history) override;

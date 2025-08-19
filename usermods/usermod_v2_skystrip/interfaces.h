@@ -9,6 +9,7 @@
 struct IConfigurable {
   virtual ~IConfigurable() = default;
   virtual void addToConfig(JsonObject& root) = 0;
+  virtual void appendConfigData(Print& s) {}
   virtual bool readFromConfig(JsonObject& root,
                               bool startup_complete,
                               bool& invalidate_history) = 0;

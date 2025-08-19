@@ -170,6 +170,15 @@ void TemperatureView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
+void TemperatureView::appendConfigData(Print& s) {
+  // Keep the hint INLINE (BEFORE the input = 4th arg):
+  s.print(F(
+    "addInfo('SkyStrip:TemperatureView:SegmentId',1,'',"
+    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+    ");"
+  ));
+}
+
 bool TemperatureView::readFromConfig(JsonObject& subtree,
                                      bool startup_complete,
                                      bool& invalidate_history) {

@@ -16,6 +16,7 @@ public:
 
   // IConfigurable
   void addToConfig(JsonObject& subtree) override;
+  void appendConfigData(Print& s) override;
   bool readFromConfig(JsonObject& subtree,
                       bool startup_complete,
                       bool& invalidate_history) override;
