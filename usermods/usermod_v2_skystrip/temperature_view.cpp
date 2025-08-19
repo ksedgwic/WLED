@@ -90,16 +90,40 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
   constexpr time_t DAY = 24 * 60 * 60;
   const long tzOffset = util::current_offset();
 
-  // Returns [0,1] marker weight based on proximity to midnight/noon boundaries
-  // in local time.
+  // Returns [0,1] marker weight based on proximity to local-time markers.
+  // Markers: 12a/12p (double width), plus 3a/3p, 6a/6p, 9a/9p (normal width).
+  // Width=1 → fades to 0 at 1 pixel; width=2 → fades to 0 at 2 pixels.
   auto markerWeight = [&](time_t t) {
     if (step <= 0.0) return 0.f;
-    time_t local = t + tzOffset;                    // convert to local seconds
-    time_t s = local % DAY; if (s < 0) s += DAY;
-    time_t diffMid  = (s <= DAY/2) ? s : DAY - s;
-    time_t diffNoon = (s >= DAY/2) ? s - DAY/2 : DAY/2 - s;
-    time_t diff = (diffMid < diffNoon) ? diffMid : diffNoon;
-    float w = 1.f - float(diff) / float(step); // 1 at center, 0 one pixel away
+
+    time_t local = t + tzOffset;           // convert to local seconds
+    time_t s = local % DAY;                 // seconds since local midnight
+    if (s < 0) s += DAY;
+
+    // Seconds-of-day for markers + per-marker width multipliers.
+    static const time_t kMarkers[] = {
+      0*3600,  3*3600,  6*3600,  9*3600,
+      12*3600, 15*3600, 18*3600, 21*3600
+    };
+    static const float majorTW = 1.6f;
+    static const float minorTW = 0.8f;
+    static const float kWidth[] = {
+      majorTW, minorTW, minorTW, minorTW,    // 12a (double), 3a, 6a, 9a
+      majorTW, minorTW, minorTW, minorTW     // 12p (double), 3p, 6p, 9p
+    };
+
+    constexpr time_t HALF_DAY = DAY / 2;
+    float w = 0.f;
+
+    const size_t N = sizeof(kMarkers) / sizeof(kMarkers[0]);
+    for (size_t i = 0; i < N; ++i) {
+      time_t m = kMarkers[i];
+      time_t d = (s > m) ? (s - m) : (m - s);
+      if (d > HALF_DAY) d = DAY - d;       // wrap on 24h circle
+      float wi = 1.f - float(d) / (float(step) * kWidth[i]);
+      if (wi > w) w = wi;                  // max of all marker influences
+    }
+
     return (w > 0.f) ? w : 0.f;
   };
 
