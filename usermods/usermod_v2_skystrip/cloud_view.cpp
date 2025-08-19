@@ -97,13 +97,28 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
       // always put the sunrise sunset markers in
       col = util::hsv2rgb(kMarkerHue, kMarkerSat, kMarkerVal);
     } else if (p != 0 && precipProb > 0.0) {
-      // precipitation has next priority: rain=blue, snow=white, mixed=cyan-ish
+      // precipitation has next priority: rain=blue, snow=lavender, mixed=indigo-ish blend
+      constexpr float kHueRain = 210.f;  // deep blue
+      constexpr float kSatRain = 1.00f;
+
+      constexpr float kHueSnow = 285.f;  // lavender for snow
+      constexpr float kSatSnow = 0.35f;  // pastel-ish (tune to taste)
+
       float ph, ps;
-      if (p == 1)      { ph = 210.f; ps = 1.0f; }
-      else if (p == 2) { ph = 0.f;   ps = 0.0f; }
-      else             { ph = 180.f; ps = 0.5f; }
+      if (p == 1) {
+        // rain
+        ph = kHueRain; ps = kSatRain;
+      } else if (p == 2) {
+        // snow → lavender
+        ph = kHueSnow; ps = kSatSnow;
+      } else {
+        // mixed → halfway between blue and lavender
+        ph = 0.5f * (kHueRain + kHueSnow);   // ~247.5° (indigo-ish)
+        ps = 0.5f * (kSatRain + kSatSnow);   // ~0.675
+      }
+
       float pv = util::clamp01(float(precipProb));
-      pv = 0.3f + 0.7f * pv;
+      pv = 0.3f + 0.7f * pv;                // brightness ramp
       col = util::hsv2rgb(ph, ps, pv);
     } else {
       // finally show daytime or nightime clouds
