@@ -163,10 +163,20 @@ void SkyStrip::appendConfigData(Print& s) {
     ");"
   ));
 
-  // Put the dump UNDER the input (AFTER it = 3rd arg):
+  // Open a preformatted region for the pixel debugging
   s.print(F(
     "addInfo('SkyStrip:DebugPixel:Index',1,"
-    "'<br><pre id=\\'skystrip_pre\\'>SkyStrip — probe\\nhello from appendConfigData()</pre>'"
+    "'<br><pre id=\\'skystrip_pre\\'>"
+  ));
+
+  // append the most recent debug pixel info from each view
+  for (auto& vw : views_) {
+    vw->appendDebugPixel(s);
+  }
+
+  // Close the preformatted region
+  s.print(F(
+    "</pre>'"
     ");"
   ));
 }
@@ -182,9 +192,10 @@ bool SkyStrip::readFromConfig(JsonObject& root) {
   // It is not safe to make API calls during startup
   bool  startup_complete = state_ == SkyStripState::Running;
 
-  // read our state
   ok &= getJsonValue(top[FPSTR(CFG_ENABLED)], enabled_, false);
-  ok &= getJsonValue(top[FPSTR(CFG_DBG_PIXEL_INDEX)], dbgPixelIndex_, -1);
+
+  JsonObject sub = top[FPSTR(CFG_PIXEL_DBG_NAME)];
+  ok &= getJsonValue(sub[FPSTR(CFG_DBG_PIXEL_INDEX)], dbgPixelIndex_, -1);
 
   // read the sources
   for (auto& src : sources_) {
