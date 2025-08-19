@@ -25,6 +25,8 @@ static bool isDay(const SkyModel& m, time_t t) {
 CloudView::CloudView()
   : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: CV::CTOR");
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
 void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
@@ -136,11 +138,16 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
 
       if (dbgPixelIndex >= 0) {
         static time_t lastDebug = 0;
-        if (now - lastDebug > 30 && i == dbgPixelIndex) {
-          char tmbuf0[20];
-          util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
-          DEBUG_PRINTF("SkyStrip: %s: i=%u timeNow=%s day=%d clouds01=%.2f sat=%.2f col=%08x\n",
-                       name().c_str(), i, tmbuf0, daytime, clouds01, sat, (unsigned)col);
+        if (now - lastDebug > 1 && i == dbgPixelIndex) {
+          char nowbuf[20];
+          util::fmt_local(nowbuf, sizeof(nowbuf), now);
+          char dbgbuf[20];
+          util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+          snprintf(debugPixelString, sizeof(debugPixelString),
+                   "%s: nowtm=%s dbgndx=%d dbgtm=%s "
+                   "day=%d clouds01=%.2f H=%.0f S=%.0f V=%.0f\\n",
+                   name().c_str(), nowbuf, i, dbgbuf,
+                   daytime, clouds01, hue, sat*100, val*100);
           lastDebug = now;
         }
       }

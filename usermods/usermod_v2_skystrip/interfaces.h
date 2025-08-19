@@ -48,4 +48,7 @@ public:
 
   /// Identify the view (optional)
   virtual std::string name() const = 0;
+
+  /// Append DebugPixel info
+  virtual void appendDebugPixel(Print& s) const = 0;
 };

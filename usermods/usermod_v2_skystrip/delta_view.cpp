@@ -67,6 +67,8 @@ static inline float intensityFromDeltas(double tempDelta, float humidDelta) {
 DeltaView::DeltaView()
   : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: DV::CTOR");
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
 void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
@@ -93,29 +95,24 @@ void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
     bool foundTempNow = util::estimateAt(model.temperature_forecast, t, step, tempNow);
     bool foundTempPrev = util::estimateAt(model.temperature_forecast, t - day, step, tempPrev);
 
-    if (dbgPixelIndex >= 0) {
-      static time_t lastDebug0 = 0;
-      if (now - lastDebug0 > 30 && i == dbgPixelIndex) {
-        char tmbuf0[20];
-        util::fmt_local(tmbuf0, sizeof(tmbuf0), t - day);
-        char tmbuf1[20];
-        util::fmt_local(tmbuf1, sizeof(tmbuf1), t);
-        DEBUG_PRINTF("SkyStrip: DV: i=%u timePrev=%s timeNow=%s\n",
-                     i, tmbuf0, tmbuf1);
-        lastDebug0 = now;
-      }
-    }
-
     if (!foundTempNow || !foundTempPrev) {
-    if (dbgPixelIndex >= 0) {
+      if (dbgPixelIndex >= 0) {
         static time_t lastDebug = 0;
-        if (now - lastDebug > 30 && i == dbgPixelIndex) {
-          DEBUG_PRINTF("SkyStrip: DV: i=%u foundTempPrev=%d foundTempNow=%d\n",
-                       i, foundTempPrev, foundTempNow);
+        if (now - lastDebug > 1 && i == dbgPixelIndex) {
+          char nowbuf[20];
+          util::fmt_local(nowbuf, sizeof(nowbuf), now);
+          char dbgbuf[20];
+          util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+          char prvbuf[20];
+          util::fmt_local(prvbuf, sizeof(prvbuf), t - day);
+          snprintf(debugPixelString, sizeof(debugPixelString),
+                   "%s: nowtm=%s dbgndx=%d dbgtm=%s prvtm=%s "
+                   "foundTempPrev=%d foundTempNow=%d\\n",
+                   name().c_str(), nowbuf, i, dbgbuf, prvbuf,
+                   foundTempPrev, foundTempNow);
           lastDebug = now;
         }
       }
-
       strip.setPixelColor(idx, 0);
       continue;
     }
@@ -139,9 +136,20 @@ void DeltaView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
 
     if (dbgPixelIndex >= 0) {
       static time_t lastDebug = 0;
-      if (now - lastDebug > 30 && i == dbgPixelIndex) {
-        DEBUG_PRINTF("SkyStrip: DV: i=%u                                                    T0=%.1fF T1=%.1fF D0=%.1fF D1=%.1fF sat=%.2f col=%08x\n",
-                     i, tempPrev, tempNow, dewPrev, dewNow, sat, (unsigned)col);
+      if (now - lastDebug > 1 && i == dbgPixelIndex) {
+        char nowbuf[20];
+        util::fmt_local(nowbuf, sizeof(nowbuf), now);
+        char dbgbuf[20];
+        util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+        char prvbuf[20];
+        util::fmt_local(prvbuf, sizeof(prvbuf), t - day);
+        snprintf(debugPixelString, sizeof(debugPixelString),
+                 "%s: nowtm=%s dbgndx=%d dbgtm=%s prvtm=%s "
+                 "tempDbg=%.1f dewDbg=%.1f tempPrev=%.1f dewPrev=%.1f "
+                 "sat=%.2f col=%08x\\n",
+                 name().c_str(), nowbuf, i, dbgbuf, prvbuf,
+                 tempNow, dewNow, tempPrev, dewPrev,
+                 sat*100, (unsigned) col);
         lastDebug = now;
       }
     }

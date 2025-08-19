@@ -13,6 +13,7 @@ public:
   // IDataViewT<SkyModel>
   void view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) override;
   std::string name() const override { return "TV"; }
+  void appendDebugPixel(Print& s) const override { s.print(debugPixelString); }
 
   // IConfigurable
   void addToConfig(JsonObject& subtree) override;
@@ -24,4 +25,5 @@ public:
 
 private:
   int16_t segId_; // -1 means disabled
+  char debugPixelString[128];
 };

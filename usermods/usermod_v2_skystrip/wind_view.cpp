@@ -35,6 +35,8 @@ static inline float satFromGustDiff(float speed, float gust) {
 WindView::WindView()
   : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: WV::CTOR");
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
 void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
@@ -62,6 +64,25 @@ void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
     float sat = satFromGustDiff((float)spd, (float)gst);
     float val = util::clamp01(float(std::max(spd, gst)) / 50.f);
     uint32_t col = util::hsv2rgb(hue, sat, val);
+
+    if (dbgPixelIndex >= 0) {
+      static time_t lastDebug = 0;
+      if (now - lastDebug > 1 && i == dbgPixelIndex) {
+        char nowbuf[20];
+        util::fmt_local(nowbuf, sizeof(nowbuf), now);
+        char dbgbuf[20];
+        util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+        snprintf(debugPixelString, sizeof(debugPixelString),
+                 "%s: nowtm=%s dbgndx=%d dbgtm=%s "
+                 "spd=%.0f gst=%.0f dir=%.0f "
+                 "H=%.0f S=%.0f V=%.0f\\n",
+                 name().c_str(), nowbuf, i, dbgbuf,
+                 spd, gst, dir,
+                 hue, sat*100, val*100);
+        lastDebug = now;
+      }
+    }
+
     int idx = seg.reverse ? (end - i) : (start + i);
     strip.setPixelColor(idx, col);
   }

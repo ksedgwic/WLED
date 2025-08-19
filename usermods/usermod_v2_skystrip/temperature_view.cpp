@@ -71,6 +71,8 @@ static uint32_t colorForTempF(double f) {
 TemperatureView::TemperatureView()
   : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: TV::CTOR");
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
 void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
@@ -153,11 +155,18 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
 
     if (dbgPixelIndex >= 0) {
       static time_t lastDebug = 0;
-      if (now - lastDebug > 30 && i == dbgPixelIndex) {
-        char tmbuf0[20];
-        util::fmt_local(tmbuf0, sizeof(tmbuf0), t);
-        DEBUG_PRINTF("SkyStrip: TV: i=%u                      timeNow=%s                     T=%.1fF           D=%.1fF sat=%.2f col=%08x\n",
-                     i, tmbuf0, tempF, dewF, sat, (unsigned)col);
+      if (now - lastDebug > 1 && i == dbgPixelIndex) {
+        char nowbuf[20];
+        util::fmt_local(nowbuf, sizeof(nowbuf), now);
+        char dbgbuf[20];
+        util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+        snprintf(debugPixelString, sizeof(debugPixelString),
+                 "%s: nowtm=%s dbgndx=%d dbgtm=%s "
+                 "tempF=%.1f dewF=%.1f "
+                 "S=%.0f col=%08x\\n",
+                 name().c_str(), nowbuf, i, dbgbuf,
+                 tempF, dewF,
+                 sat*100, (unsigned) col);
         lastDebug = now;
       }
     }

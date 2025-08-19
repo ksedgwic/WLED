@@ -73,6 +73,8 @@ TestPatternView::TestPatternView()
     startHue_(0.f), startSat_(0.f), startVal_(0.f),
     endHue_(0.f), endSat_(0.f), endVal_(1.f) {
   DEBUG_PRINTLN("SkyStrip: TP::CTOR");
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
 void TestPatternView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
