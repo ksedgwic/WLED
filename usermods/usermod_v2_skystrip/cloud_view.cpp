@@ -155,6 +155,15 @@ void CloudView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
+void CloudView::appendConfigData(Print& s) {
+  // Keep the hint INLINE (BEFORE the input = 4th arg):
+  s.print(F(
+    "addInfo('SkyStrip:CloudView:SegmentId',1,'',"
+    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+    ");"
+  ));
+}
+
 bool CloudView::readFromConfig(JsonObject& subtree,
                                bool startup_complete,
                                bool& invalidate_history) {

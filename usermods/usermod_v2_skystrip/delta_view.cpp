@@ -154,6 +154,15 @@ void DeltaView::addToConfig(JsonObject& subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
+void DeltaView::appendConfigData(Print& s) {
+  // Keep the hint INLINE (BEFORE the input = 4th arg):
+  s.print(F(
+    "addInfo('SkyStrip:DeltaView:SegmentId',1,'',"
+    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+    ");"
+  ));
+}
+
 bool DeltaView::readFromConfig(JsonObject& subtree,
                                bool startup_complete,
                                bool& invalidate_history) {

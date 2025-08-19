@@ -36,6 +36,7 @@ public:
   void loop() override;
   void handleOverlayDraw() override;
   void addToConfig(JsonObject &obj) override;
+  void appendConfigData(Print& s) override;
   bool readFromConfig(JsonObject &obj) override;
   uint16_t getId() override { return USERMOD_ID_SKYSTRIP; };
 

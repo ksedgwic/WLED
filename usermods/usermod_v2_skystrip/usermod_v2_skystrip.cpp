@@ -16,7 +16,8 @@
 
 const char CFG_NAME[] = "SkyStrip";
 const char CFG_ENABLED[] = "Enabled";
-const char CFG_DBG_PIXEL_INDEX[] = "DebugPixelIndex";
+const char CFG_PIXEL_DBG_NAME[] = "DebugPixel";
+const char CFG_DBG_PIXEL_INDEX[] = "Index";
 
 static SkyStrip skystrip_usermod;
 REGISTER_USERMOD(skystrip_usermod);
@@ -129,7 +130,6 @@ void SkyStrip::addToConfig(JsonObject& root) {
 
   // write our state
   top[FPSTR(CFG_ENABLED)] = enabled_;
-  top[FPSTR(CFG_DBG_PIXEL_INDEX)] = dbgPixelIndex_;
 
   // write the sources
   for (auto& src : sources_) {
@@ -142,6 +142,33 @@ void SkyStrip::addToConfig(JsonObject& root) {
     JsonObject sub = top.createNestedObject(vw->configKey());
     vw->addToConfig(sub);
   }
+
+  JsonObject sub = top.createNestedObject(FPSTR(CFG_PIXEL_DBG_NAME));
+  sub[FPSTR(CFG_DBG_PIXEL_INDEX)] = dbgPixelIndex_;
+}
+
+void SkyStrip::appendConfigData(Print& s) {
+  for (auto& src : sources_) {
+    src->appendConfigData(s);
+  }
+
+  for (auto& vw : views_) {
+    vw->appendConfigData(s);
+  }
+
+  // Keep the hint INLINE (BEFORE the input = 4th arg):
+  s.print(F(
+    "addInfo('SkyStrip:DebugPixel:Index',1,'',"
+    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+    ");"
+  ));
+
+  // Put the dump UNDER the input (AFTER it = 3rd arg):
+  s.print(F(
+    "addInfo('SkyStrip:DebugPixel:Index',1,"
+    "'<br><pre id=\\'skystrip_pre\\'>SkyStrip — probe\\nhello from appendConfigData()</pre>'"
+    ");"
+  ));
 }
 
 // called by WLED when settings are restored
