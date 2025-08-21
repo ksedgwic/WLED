@@ -158,27 +158,34 @@ void SkyStrip::appendConfigData(Print& s) {
 
   // Keep the hint INLINE (BEFORE the input = 4th arg):
   s.print(F(
-    "addInfo('SkyStrip:DebugPixel:Index',1,'',"
-    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
-    ");"
-  ));
+            "addInfo('SkyStrip:DebugPixel:Index',1,'',"
+            "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+            ");"
+            ));
 
-  // Open a preformatted region for the pixel debugging
+  // Open a read-only textarea region for the pixel debugging
   s.print(F(
-    "addInfo('SkyStrip:DebugPixel:Index',1,"
-    "'<br><pre id=\\'skystrip_pre\\'>"
-  ));
+            "addInfo('SkyStrip:DebugPixel:Index',1,"
+            "'<br><textarea id=\\'skystrip_pre\\' rows=\\'8\\' wrap=\\'off\\' readonly "
+            "spellcheck=\\'false\\' "
+            "style=\\'width:calc(100% - 12rem);margin:0 6rem;"
+            "background:#000;color:#fff;text-align:left;"
+            "font-family:monospace;line-height:1.3;tab-size:2;"
+            "overflow:auto;-webkit-user-select:text;user-select:text;\\' "
+            "title=\\'Click to select; then copy\\' "
+            "onclick=\\'this.focus();this.select();\\'>"
+            ));
 
   // append the most recent debug pixel info from each view
   for (auto& vw : views_) {
     vw->appendDebugPixel(s);
   }
 
-  // Close the preformatted region
+  // Close the textarea region
   s.print(F(
-    "</pre>'"
-    ");"
-  ));
+            "</textarea>'"
+            ");"
+            ));
 }
 
 // called by WLED when settings are restored
