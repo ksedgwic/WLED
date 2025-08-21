@@ -166,7 +166,7 @@ void TemperatureView::view(time_t now, SkyModel const &model,
       }
     }
 
-    strip.setPixelColor(idx, col);
+    strip.setPixelColor(idx, util::blinkDebug(i, dbgPixelIndex, col));
   }
 }
 
