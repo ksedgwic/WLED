@@ -62,7 +62,12 @@ void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
     if (!util::estimateGustAt(model, t, step, gst)) gst = spd;
     float hue = hueFromDir((float)dir);
     float sat = satFromGustDiff((float)spd, (float)gst);
-    float val = util::clamp01(float(std::max(spd, gst)) / 50.f);
+
+    // Boost low winds with a floor so sub-10 values aren't lost to quantization/gamma.
+    float u = util::clamp01(float(std::max(spd, gst)) / 50.f);
+    constexpr float kMinV = 0.18f;  // visible floor when wind > 0 (tune 0.12–0.22)
+    float val = (u <= 0.f) ? 0.f : (kMinV + (1.f - kMinV) * u);
+
     uint32_t col = util::hsv2rgb(hue, sat, val);
 
     if (dbgPixelIndex >= 0) {
