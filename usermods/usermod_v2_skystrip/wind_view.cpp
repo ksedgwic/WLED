@@ -1,9 +1,9 @@
 #include "wind_view.h"
 #include "skymodel.h"
+#include "util.h"
 #include "wled.h"
 #include <algorithm>
 #include <cmath>
-#include "util.h"
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] = "SegmentId";
@@ -23,33 +23,38 @@ static inline float hueFromDir(float dir) {
 }
 
 static inline float satFromGustDiff(float speed, float gust) {
-  float diff = gust - speed; if (diff < 0.f) diff = 0.f;
+  float diff = gust - speed;
+  if (diff < 0.f)
+    diff = 0.f;
   constexpr float kMinSat = 0.40f;
   constexpr float kMaxDiff = 20.0f;
   float u = util::clamp01(diff / kMaxDiff);
-  float eased = u*u*(3.f - 2.f*u);
+  float eased = u * u * (3.f - 2.f * u);
   return kMinSat + (1.f - kMinSat) * eased;
 }
 
-
-WindView::WindView()
-  : segId_(DEFAULT_SEG_ID) {
+WindView::WindView() : segId_(DEFAULT_SEG_ID) {
   DEBUG_PRINTLN("SkyStrip: WV::CTOR");
-  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n", name().c_str());
+  snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n",
+           name().c_str());
   debugPixelString[sizeof(debugPixelString) - 1] = '\0';
 }
 
-void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
-  if (segId_ == DEFAULT_SEG_ID) return;
-  if (model.wind_speed_forecast.empty()) return;
-  if (segId_ < 0 || segId_ >= strip.getMaxSegments()) return;
+void WindView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
+  if (segId_ == DEFAULT_SEG_ID)
+    return;
+  if (model.wind_speed_forecast.empty())
+    return;
+  if (segId_ < 0 || segId_ >= strip.getMaxSegments())
+    return;
 
   Segment &seg = strip.getSegment((uint8_t)segId_);
   seg.freeze = true;
   int start = seg.start;
   int end = seg.stop - 1;
   int len = end - start + 1;
-  if (len == 0) return;
+  if (len == 0)
+    return;
 
   constexpr double kHorizonSec = 48.0 * 3600.0;
   const double step = (len > 1) ? (kHorizonSec / double(len - 1)) : 0.0;
@@ -57,15 +62,20 @@ void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
   for (uint16_t i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
     double spd, dir, gst;
-    if (!util::estimateSpeedAt(model, t, step, spd)) continue;
-    if (!util::estimateDirAt(model, t, step, dir)) continue;
-    if (!util::estimateGustAt(model, t, step, gst)) gst = spd;
+    if (!util::estimateSpeedAt(model, t, step, spd))
+      continue;
+    if (!util::estimateDirAt(model, t, step, dir))
+      continue;
+    if (!util::estimateGustAt(model, t, step, gst))
+      gst = spd;
     float hue = hueFromDir((float)dir);
     float sat = satFromGustDiff((float)spd, (float)gst);
 
-    // Boost low winds with a floor so sub-10 values aren't lost to quantization/gamma.
+    // Boost low winds with a floor so sub-10 values aren't lost to
+    // quantization/gamma.
     float u = util::clamp01(float(std::max(spd, gst)) / 50.f);
-    constexpr float kMinV = 0.18f;  // visible floor when wind > 0 (tune 0.12–0.22)
+    constexpr float kMinV =
+        0.18f; // visible floor when wind > 0 (tune 0.12–0.22)
     float val = (u <= 0.f) ? 0.f : (kMinV + (1.f - kMinV) * u);
 
     uint32_t col = util::hsv2rgb(hue, sat, val);
@@ -81,35 +91,32 @@ void WindView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) {
                  "%s: nowtm=%s dbgndx=%d dbgtm=%s "
                  "spd=%.0f gst=%.0f dir=%.0f "
                  "H=%.0f S=%.0f V=%.0f\\n",
-                 name().c_str(), nowbuf, i, dbgbuf,
-                 spd, gst, dir,
-                 hue, sat*100, val*100);
+                 name().c_str(), nowbuf, i, dbgbuf, spd, gst, dir, hue,
+                 sat * 100, val * 100);
         lastDebug = now;
       }
     }
 
     int idx = seg.reverse ? (end - i) : (start + i);
-    strip.setPixelColor(idx, col);
+    strip.setPixelColor(idx, util::blinkDebug(i, dbgPixelIndex, col));
   }
 }
 
-void WindView::addToConfig(JsonObject& subtree) {
+void WindView::addToConfig(JsonObject &subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
 }
 
-void WindView::appendConfigData(Print& s) {
+void WindView::appendConfigData(Print &s) {
   // Keep the hint INLINE (BEFORE the input = 4th arg):
-  s.print(F(
-    "addInfo('SkyStrip:WindView:SegmentId',1,'',"
-    "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
-    ");"
-  ));
+  s.print(F("addInfo('SkyStrip:WindView:SegmentId',1,'',"
+            "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+            ");"));
 }
 
-bool WindView::readFromConfig(JsonObject& subtree,
-                              bool startup_complete,
-                              bool& invalidate_history) {
+bool WindView::readFromConfig(JsonObject &subtree, bool startup_complete,
+                              bool &invalidate_history) {
   bool configComplete = !subtree.isNull();
-  configComplete &= getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
+  configComplete &=
+      getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
   return configComplete;
 }

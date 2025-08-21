@@ -141,14 +141,13 @@ void DeltaView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
                  "%s: nowtm=%s dbgndx=%d dbgtm=%s prvtm=%s "
                  "dT=%.1f dSpread=%.1f "
                  "H=%.0f S=%.0f V=%.0f\\n",
-                 name().c_str(), nowbuf, i, dbgbuf, prvbuf,
-                 deltaT, spreadDelta, hue, sat * 100,
-                 val * 100);
+                 name().c_str(), nowbuf, i, dbgbuf, prvbuf, deltaT, spreadDelta,
+                 hue, sat * 100, val * 100);
         lastDebug = now;
       }
     }
 
-    strip.setPixelColor(idx, col);
+    strip.setPixelColor(idx, util::blinkDebug(i, dbgPixelIndex, col));
   }
 }
 
