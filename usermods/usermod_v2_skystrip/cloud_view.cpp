@@ -78,8 +78,8 @@ void CloudView::view(time_t now, SkyModel const & model, int16_t dbgPixelIndex) 
   constexpr float kNightHue = 300.f;
   constexpr float kDaySat   = 0.30f;
   constexpr float kNightSat = 0.00f;
-  constexpr float kDayVMax  = 0.50f;
-  constexpr float kNightVMax= 0.40f;
+  constexpr float kDayVMax  = 0.40f;
+  constexpr float kNightVMax= 0.30f;
   constexpr float kMarkerHue= 25.f;
   constexpr float kMarkerSat= 0.60f;
   constexpr float kMarkerVal= 0.50f;
