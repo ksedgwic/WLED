@@ -1,4 +1,6 @@
 #include <limits>
+#include <cstdlib>
+#include <cmath>
 
 #include "open_weather_map_source.h"
 #include "skymodel.h"
@@ -23,6 +25,97 @@ const char CFG_LATITUDE[] = "Latitude";
 const char CFG_LONGITUDE[] = "Longitude";
 const char CFG_INTERVAL_SEC[] = "IntervalSec";
 const char CFG_LOCATION[] = "Location";
+
+// keep commas; encode spaces etc.
+static String urlEncode(const String& s) {
+  static const char hex[] = "0123456789ABCDEF";
+  String out; out.reserve(s.length()*3);
+  for (size_t i = 0; i < s.length(); ++i) {
+    uint8_t c = (uint8_t)s[i];
+    if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||
+        c=='-'||c=='_'||c=='.'||c=='~'||c==',')
+      out += (char)c;
+    else if (c==' ') out += "%20";
+    else { out += '%'; out += hex[c>>4]; out += hex[c&0xF]; }
+  }
+  return out;
+}
+
+// Normalize "Oakland, CA, USA" → "Oakland,CA,US"
+static String normalizeLocation(String q) {
+  q.trim();
+  q.replace(" ", "");
+  q.replace(",USA", ",US");
+  return q;
+}
+
+static bool parseCoordToken(String token, double& out) {
+  token.trim();
+  token.toLowerCase();
+  bool neg = false;
+  if (token.startsWith("s") || token.startsWith("w")) {
+    neg = true;
+    token.remove(0, 1);
+  } else if (token.startsWith("n") || token.startsWith("e")) {
+    token.remove(0, 1);
+  }
+  token.trim();
+  if (token.endsWith("s") || token.endsWith("w")) {
+    neg = true;
+    token.remove(token.length() - 1);
+  } else if (token.endsWith("n") || token.endsWith("e")) {
+    token.remove(token.length() - 1);
+  }
+  token.trim();
+  token.replace("°", " ");
+  token.replace("\"", " ");
+  token.replace("'", " ");
+  token.trim();
+  char* end = nullptr;
+  double deg = strtod(token.c_str(), &end);
+  if (end == token.c_str()) return false;
+  bool negNum = deg < 0;
+  deg = fabs(deg);
+  String rest(end);
+  rest.trim();
+  double min = 0, sec = 0;
+  if (rest.length() > 0) {
+    char* end2 = nullptr;
+    min = strtod(rest.c_str(), &end2);
+    if (end2 != rest.c_str()) {
+      String rest2(end2);
+      rest2.trim();
+      if (rest2.length() > 0) {
+        sec = strtod(rest2.c_str(), &end2);
+      }
+    }
+  }
+  if (negNum) neg = true;
+  out = deg + min / 60.0 + sec / 3600.0;
+  if (neg) out = -out;
+  return true;
+}
+
+static bool parseLatLon(String s, double& lat, double& lon) {
+  s.trim();
+  int comma = s.indexOf(',');
+  String a, b;
+  if (comma >= 0) {
+    a = s.substring(0, comma);
+    b = s.substring(comma + 1);
+  } else {
+    int space = s.lastIndexOf(' ');
+    if (space < 0) return false;
+    a = s.substring(0, space);
+    b = s.substring(space + 1);
+  }
+  a.trim();
+  b.trim();
+  if (a.length() == 0 || b.length() == 0) return false;
+  if (!parseCoordToken(a, lat)) return false;
+  if (!parseCoordToken(b, lon)) return false;
+  return true;
+}
 
 OpenWeatherMapSource::OpenWeatherMapSource()
     : apiBase_(DEFAULT_API_BASE)
@@ -61,18 +154,20 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
   configComplete &= getJsonValue(subtree[FPSTR(CFG_LONGITUDE)], longitude_, DEFAULT_LONGITUDE);
   configComplete &= getJsonValue(subtree[FPSTR(CFG_INTERVAL_SEC)], intervalSec_, DEFAULT_INTERVAL_SEC);
 
-  // If we are safely past the boot/startup phase we can make API
-  // calls to update lat/long ...
-  if (running) {
-    if (location_ == lastLocation_) {
-      // if the user changed the lat and long directly clear the location
-      if (latitude_ != oldLatitude || longitude_ != oldLongitude)
-        location_ = "";
-    } else {
-      // the user changed the location ... look it up
-      lastLocation_ = location_;
-      if (location_.length() > 0) {
-        double lat=0, lon=0; int matches=0;
+  // If the location changed update lat/long via parsing or lookup
+  if (location_ == lastLocation_) {
+    // if the user changed the lat and long directly clear the location
+    if (latitude_ != oldLatitude || longitude_ != oldLongitude)
+      location_ = "";
+  } else {
+    lastLocation_ = location_;
+    if (location_.length() > 0) {
+      double lat = 0, lon = 0;
+      if (parseLatLon(String(location_.c_str()), lat, lon)) {
+        latitude_ = lat;
+        longitude_ = lon;
+      } else if (running) {
+        int matches = 0;
         bool ok = geocodeOWM(location_, lat, lon, &matches);
         latitude_ = ok ? lat : 0.0;
         longitude_ = ok ? lon : 0.0;
@@ -263,29 +358,6 @@ void OpenWeatherMapSource::reload(std::time_t now) {
   // If you later add backoff/jitter, clear it here too.
   // backoffExp_ = 0; nextRetryAt_ = 0;
   DEBUG_PRINTF("SkyStrip: %s::reload (interval=%u)\n", name().c_str(), intervalSec_);
-}
-
-// keep commas; encode spaces etc.
-static String urlEncode(const String& s) {
-  static const char hex[] = "0123456789ABCDEF";
-  String out; out.reserve(s.length()*3);
-  for (size_t i = 0; i < s.length(); ++i) {
-    uint8_t c = (uint8_t)s[i];
-    if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||
-        c=='-'||c=='_'||c=='.'||c=='~'||c==',')
-      out += (char)c;
-    else if (c==' ') out += "%20";
-    else { out += '%'; out += hex[c>>4]; out += hex[c&0xF]; }
-  }
-  return out;
-}
-
-// Normalize "Oakland, CA, USA" → "Oakland,CA,US"
-static String normalizeLocation(String q) {
-  q.trim();
-  q.replace(" ", "");
-  q.replace(",USA", ",US");
-  return q;
 }
 
 // Returns true iff exactly one match; sets lat/lon. Otherwise zeros them.
