@@ -64,6 +64,11 @@ TemperatureView::TemperatureView() : segId_(DEFAULT_SEG_ID) {
 
 void TemperatureView::view(time_t now, SkyModel const &model,
                            int16_t dbgPixelIndex) {
+  if (dbgPixelIndex < 0) {
+    snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n",
+             name().c_str());
+    debugPixelString[sizeof(debugPixelString) - 1] = '\0';
+  }
   if (segId_ == DEFAULT_SEG_ID)
     return; // disabled
   if (model.temperature_forecast.empty())
