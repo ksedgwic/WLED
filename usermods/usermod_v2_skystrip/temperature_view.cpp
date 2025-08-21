@@ -107,11 +107,12 @@ void TemperatureView::view(time_t now, SkyModel const & model, int16_t dbgPixelI
       0*3600,  3*3600,  6*3600,  9*3600,
       12*3600, 15*3600, 18*3600, 21*3600
     };
+    static const float dayTW = 2.0f;
     static const float majorTW = 1.6f;
     static const float minorTW = 0.8f;
     static const float kWidth[] = {
-      majorTW, minorTW, minorTW, minorTW,    // 12a (double), 3a, 6a, 9a
-      majorTW, minorTW, minorTW, minorTW     // 12p (double), 3p, 6p, 9p
+      dayTW, minorTW, minorTW, minorTW,    // midnight, 3a, 6a, 9a
+      majorTW, minorTW, minorTW, minorTW   // noon, 3p, 6p, 9p
     };
 
     constexpr time_t HALF_DAY = DAY / 2;
