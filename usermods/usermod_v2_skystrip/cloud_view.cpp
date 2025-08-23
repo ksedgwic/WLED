@@ -123,11 +123,15 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
 
     float clouds01 = util::clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
+    bool daytime = isDay(model, t);
+    int idx = seg.reverse ? (end - i) : (start + i);
 
-    uint32_t col = 0;
+    float hue = 0.f, sat = 0.f, val = 0.f;
     if (isMarker(t)) {
       // always put the sunrise sunset markers in
-      col = util::hsv2rgb(kMarkerHue, kMarkerSat, kMarkerVal);
+      hue = kMarkerHue;
+      sat = kMarkerSat;
+      val = kMarkerVal;
     } else if (p != 0 && precipProb > 0.0) {
       // precipitation has next priority: rain=blue, snow=lavender,
       // mixed=indigo-ish blend
@@ -154,41 +158,39 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
 
       float pv = util::clamp01(float(precipProb));
       pv = 0.3f + 0.7f * pv; // brightness ramp
-      col = util::hsv2rgb(ph, ps, pv);
+      hue = ph;
+      sat = ps;
+      val = pv;
     } else {
       // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
-        int idx = seg.reverse ? (end - i) : (start + i);
         strip.setPixelColor(idx, 0);
         continue;
       }
-      bool daytime = isDay(model, t);
       float vmax = daytime ? kDayVMax : kNightVMax;
       float vmin = (daytime ? kDayVMinFrac : kNightVMinFrac) * vmax;
-      float val  = vmin + (vmax - vmin) * clouds01;  // floor-boosted brightness
-      float hue = daytime ? kDayHue : kNightHue;
-      float sat = daytime ? kDaySat : kNightSat;
-      col = util::hsv2rgb(hue, sat, val);
-
-      if (dbgPixelIndex >= 0) {
-        static time_t lastDebug = 0;
-        if (now - lastDebug > 1 && i == dbgPixelIndex) {
-          char nowbuf[20];
-          util::fmt_local(nowbuf, sizeof(nowbuf), now);
-          char dbgbuf[20];
-          util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
-          snprintf(debugPixelString, sizeof(debugPixelString),
-                   "%s: nowtm=%s dbgndx=%d dbgtm=%s "
-                   "day=%d clouds01=%.2f H=%.0f S=%.0f V=%.0f\\n",
-                   name().c_str(), nowbuf, i, dbgbuf, daytime, clouds01, hue,
-                   sat * 100, val * 100);
-          lastDebug = now;
-        }
-      }
+      val  = vmin + (vmax - vmin) * clouds01;  // floor-boosted brightness
+      hue = daytime ? kDayHue : kNightHue;
+      sat = daytime ? kDaySat : kNightSat;
     }
 
-    int idx = seg.reverse ? (end - i) : (start + i);
+    uint32_t col = util::hsv2rgb(hue, sat, val);
     strip.setPixelColor(idx, util::blinkDebug(i, dbgPixelIndex, col));
+
+    if (dbgPixelIndex >= 0) {
+      static time_t lastDebug = 0;
+      if (now - lastDebug > 1 && i == dbgPixelIndex) {
+        char nowbuf[20];
+        util::fmt_local(nowbuf, sizeof(nowbuf), now);
+        char dbgbuf[20];
+        util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
+        snprintf(debugPixelString, sizeof(debugPixelString),
+                 "%s: nowtm=%s dbgndx=%d dbgtm=%s day=%d clouds01=%.2f precip=%d pop=%.2f H=%.0f S=%.0f V=%.0f\\n",
+                 name().c_str(), nowbuf, i, dbgbuf, daytime, clouds01, p,
+                 precipProb, hue, sat * 100, val * 100);
+        lastDebug = now;
+      }
+    }
   }
 }
 
