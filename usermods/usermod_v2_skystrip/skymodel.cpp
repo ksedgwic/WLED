@@ -66,10 +66,10 @@ SkyModel & SkyModel::update(time_t now, SkyModel && other) {
     sunset_  = other.sunset_;
   }
 
-  emitDebug(now, [](const String& line){
-    DEBUG_PRINTF("%s\n", line.c_str());
-  });
- 
+#ifdef WLED_DEBUG
+  emitDebug(now, DEBUGOUT);
+#endif
+
   return *this;
 }
 
@@ -105,71 +105,55 @@ time_t SkyModel::oldest() const {
 
 // Streamed/line-by-line variant to keep packets small.
 template <class Series>
-static inline void emitSeriesMDHM(const std::function<void(const String&)> &emit,
-                                  time_t /*now*/,
-                                  const __FlashStringHelper *label,
+static inline void emitSeriesMDHM(Print &out, time_t now, const char *label,
                                   const Series &s) {
-  // Header
-  {
-    String line;
-    line.reserve(64);
-    line += F("SkyModel: ");
-    line += label;
-    line += F("(");
-    line += String(s.size());
-    line += F("):[");
-    emit(line);
-  }
+  char tb[20];
+  util::fmt_local(tb, sizeof(tb), now);
+  char line[256];
+  int len = snprintf(line, sizeof(line), "SkyModel: now=%s: %s(%u):[\n",
+                     tb, label, (unsigned)s.size());
+  out.write((const uint8_t*)line, len);
 
   if (s.empty()) {
-    emit(String(F("SkyModel: ]")));
+    len = snprintf(line, sizeof(line), "SkyModel: ]\n");
+    out.write((const uint8_t*)line, len);
     return;
   }
 
-  char tb[20];
-  char valbuf[16];
   size_t i = 0;
-  String line;
-  line.reserve(256);
+  size_t off = 0;
   for (const auto& dp : s) {
     if (i % 6 == 0) {
-      if (line.length()) { emit(line); line = ""; }
-      line += F("SkyModel: ");
+      off = snprintf(line, sizeof(line), "SkyModel:");
     }
     util::fmt_local(tb, sizeof(tb), dp.tstamp);
-    snprintf(valbuf, sizeof(valbuf), "%6.2f", dp.value);
-    line += F(" (");
-    line += tb;
-    line += F(", ");
-    line += valbuf;
-    line += F(")");
+    off += snprintf(line + off, sizeof(line) - off,
+                    " (%s, %6.2f)", tb, dp.value);
     if (i % 6 == 5 || i == s.size() - 1) {
-      if (i == s.size() - 1) line += F(" ]");
-      emit(line);
-      line = "";
+      if (i == s.size() - 1) off += snprintf(line + off, sizeof(line) - off, " ]");
+      line[off++] = '\n';
+      out.write((const uint8_t*)line, off);
     }
     ++i;
   }
 }
 
-void SkyModel::emitDebug(time_t now, const std::function<void(const String&)> &emit) const {
-  emitSeriesMDHM(emit, now, F(" temp"),  temperature_forecast);
-  emitSeriesMDHM(emit, now, F(" dwpt"),  dew_point_forecast);
-  emitSeriesMDHM(emit, now, F(" wspd"),  wind_speed_forecast);
-  emitSeriesMDHM(emit, now, F(" wgst"),  wind_gust_forecast);
-  emitSeriesMDHM(emit, now, F(" wdir"),  wind_dir_forecast);
-  emitSeriesMDHM(emit, now, F(" clds"),  cloud_cover_forecast);
-  emitSeriesMDHM(emit, now, F(" prcp"),  precip_type_forecast);
-  emitSeriesMDHM(emit, now, F(" pop"),   precip_prob_forecast);
+void SkyModel::emitDebug(time_t now, Print& out) const {
+  emitSeriesMDHM(out, now, " temp",  temperature_forecast);
+  emitSeriesMDHM(out, now, " dwpt",  dew_point_forecast);
+  emitSeriesMDHM(out, now, " wspd",  wind_speed_forecast);
+  emitSeriesMDHM(out, now, " wgst",  wind_gust_forecast);
+  emitSeriesMDHM(out, now, " wdir",  wind_dir_forecast);
+  emitSeriesMDHM(out, now, " clds",  cloud_cover_forecast);
+  emitSeriesMDHM(out, now, " prcp",  precip_type_forecast);
+  emitSeriesMDHM(out, now, " pop",   precip_prob_forecast);
 
-  // Sunrise / Sunset as separate small lines
-  {
-    char tb[20];
-    String line;
-    line.reserve(64);
-    util::fmt_local(tb, sizeof(tb), sunrise_);
-    line  = F("SkyModel: sunrise "); line += tb; emit(line);
-    util::fmt_local(tb, sizeof(tb), sunset_);
-    line  = F("SkyModel: sunset ");  line += tb; emit(line);
-  }
+  char tb[20];
+  char line[64];
+  util::fmt_local(tb, sizeof(tb), sunrise_);
+  int len = snprintf(line, sizeof(line), "SkyModel: sunrise %s\n", tb);
+  out.write((const uint8_t*)line, len);
+  util::fmt_local(tb, sizeof(tb), sunset_);
+  len = snprintf(line, sizeof(line), "SkyModel: sunset %s\n", tb);
+  out.write((const uint8_t*)line, len);
 }
