@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ctime>
-#include <deque>
+#include <vector>
 #include <functional>
 #include <memory>
 
@@ -14,7 +14,7 @@ struct DataPoint {
 
 class SkyModel {
 public:
-  SkyModel() = default;
+  SkyModel();
 
   // move-only
   SkyModel(const SkyModel &) = delete;
@@ -31,14 +31,14 @@ public:
   void emitDebug(time_t now, const std::function<void(const String&)> &emit) const;
 
   std::time_t lcl_tstamp{0};			// update timestamp from our clock
-  std::deque<DataPoint> temperature_forecast;
-  std::deque<DataPoint> dew_point_forecast;
-  std::deque<DataPoint> wind_speed_forecast;
-  std::deque<DataPoint> wind_gust_forecast;
-  std::deque<DataPoint> wind_dir_forecast;
-  std::deque<DataPoint> cloud_cover_forecast;
-  std::deque<DataPoint> precip_type_forecast;   // 0 none, 1 rain, 2 snow, 3 mixed
-  std::deque<DataPoint> precip_prob_forecast;   // 0..1 probability of precip
+    std::vector<DataPoint> temperature_forecast;
+    std::vector<DataPoint> dew_point_forecast;
+    std::vector<DataPoint> wind_speed_forecast;
+    std::vector<DataPoint> wind_gust_forecast;
+    std::vector<DataPoint> wind_dir_forecast;
+    std::vector<DataPoint> cloud_cover_forecast;
+    std::vector<DataPoint> precip_type_forecast;   // 0 none, 1 rain, 2 snow, 3 mixed
+    std::vector<DataPoint> precip_prob_forecast;   // 0..1 probability of precip
 
   // sunrise/sunset times from current data
   time_t sunrise_{0};

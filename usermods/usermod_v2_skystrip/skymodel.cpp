@@ -1,5 +1,6 @@
 #include <cassert>
 #include <limits>
+#include <algorithm>
 
 #include "wled.h"
 
@@ -8,39 +9,45 @@
 
 namespace {
   static constexpr time_t HISTORY_SEC = 25 * 60 * 60;  // keep an extra history point
+  // Preallocate enough space for forecast (48h) plus backfilled history (~24h)
+  // without imposing a hard cap; vectors can still grow beyond this reserve.
+  static constexpr size_t MAX_POINTS = 80;
 
 template <class Series>
 void mergeSeries(Series &current, Series &&fresh, time_t now) {
-  Series merged;
+  if (fresh.empty()) return;
 
-  if (fresh.empty()) {
-    merged = current;
-  } else if (current.empty()) {
-    merged = std::move(fresh);
+  if (current.empty()) {
+    current = std::move(fresh);
   } else if (fresh.back().tstamp < current.front().tstamp) {
-    // incoming data is entirely older than what we have, prepend it
-    merged = std::move(fresh);
-    merged.insert(merged.end(), current.begin(), current.end());
+    // Fresh points are entirely earlier than current data; prepend in-place.
+    fresh.reserve(current.size() + fresh.size());
+    fresh.insert(fresh.end(), current.begin(), current.end());
+    current = std::move(fresh);
   } else {
-    // incoming data is current or newer, keep older history
-    merged = std::move(fresh);
-    time_t earliest_new = merged.front().tstamp;
-
-    Series older;
-    for (const auto &dp : current) {
-      if (dp.tstamp < earliest_new) older.push_back(dp);
-      else break;
-    }
-    merged.insert(merged.begin(), older.begin(), older.end());
+    auto it = std::lower_bound(current.begin(), current.end(), fresh.front().tstamp,
+                               [](const DataPoint& dp, time_t t){ return dp.tstamp < t; });
+    current.erase(it, current.end());
+    current.insert(current.end(), fresh.begin(), fresh.end());
   }
 
   time_t cutoff = now - HISTORY_SEC;
-  while (!merged.empty() && merged.front().tstamp < cutoff) {
-    merged.pop_front();
-  }
-  current = std::move(merged);
+  auto itCut = std::lower_bound(current.begin(), current.end(), cutoff,
+                                [](const DataPoint& dp, time_t t){ return dp.tstamp < t; });
+  current.erase(current.begin(), itCut);
 }
 } // namespace
+
+SkyModel::SkyModel() {
+  temperature_forecast.reserve(MAX_POINTS);
+  dew_point_forecast.reserve(MAX_POINTS);
+  wind_speed_forecast.reserve(MAX_POINTS);
+  wind_gust_forecast.reserve(MAX_POINTS);
+  wind_dir_forecast.reserve(MAX_POINTS);
+  cloud_cover_forecast.reserve(MAX_POINTS);
+  precip_type_forecast.reserve(MAX_POINTS);
+  precip_prob_forecast.reserve(MAX_POINTS);
+}
 
 SkyModel & SkyModel::update(time_t now, SkyModel && other) {
   lcl_tstamp = other.lcl_tstamp;
@@ -81,7 +88,7 @@ void SkyModel::invalidate_history(time_t now) {
 
 time_t SkyModel::oldest() const {
   time_t out = std::numeric_limits<time_t>::max();
-  auto upd = [&](const std::deque<DataPoint>& s){
+  auto upd = [&](const std::vector<DataPoint>& s){
     if (!s.empty() && s.front().tstamp < out) out = s.front().tstamp;
   };
   upd(temperature_forecast);
@@ -126,7 +133,7 @@ static inline void emitSeriesMDHM(const std::function<void(const String&)> &emit
   line.reserve(256);
   for (const auto& dp : s) {
     if (i % 6 == 0) {
-      if (line.length()) { emit(line); line = String(); line.reserve(256); }
+      if (line.length()) { emit(line); line = ""; }
       line += F("SkyModel: ");
     }
     util::fmt_local(tb, sizeof(tb), dp.tstamp);
@@ -139,8 +146,7 @@ static inline void emitSeriesMDHM(const std::function<void(const String&)> &emit
     if (i % 6 == 5 || i == s.size() - 1) {
       if (i == s.size() - 1) line += F(" ]");
       emit(line);
-      line = String();
-      line.reserve(256);
+      line = "";
     }
     ++i;
   }
@@ -160,6 +166,7 @@ void SkyModel::emitDebug(time_t now, const std::function<void(const String&)> &e
   {
     char tb[20];
     String line;
+    line.reserve(64);
     util::fmt_local(tb, sizeof(tb), sunrise_);
     line  = F("SkyModel: sunrise "); line += tb; emit(line);
     util::fmt_local(tb, sizeof(tb), sunset_);
