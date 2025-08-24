@@ -3,7 +3,8 @@
 #include "rest_json_client.h"
 
 RestJsonClient::RestJsonClient()
-  : lastFetchMs_(static_cast<unsigned long>(-static_cast<long>(RATE_LIMIT_MS))) {
+  : lastFetchMs_(static_cast<unsigned long>(-static_cast<long>(RATE_LIMIT_MS)))
+  , doc_(MAX_JSON_SIZE) {
   client_.setInsecure();
 }
 
@@ -12,8 +13,7 @@ void RestJsonClient::resetRateLimit() {
   lastFetchMs_ = millis() - static_cast<unsigned long>(-static_cast<long>(RATE_LIMIT_MS));
 }
 
-std::unique_ptr<DynamicJsonDocument>
-RestJsonClient::getJson(String const &url) {
+DynamicJsonDocument* RestJsonClient::getJson(const char* url) {
   // enforce a basic rate limit to prevent runaway software from making bursts
   // of API calls (looks like DoS and get's our API key turned off ...)
   unsigned long now_ms = millis();
@@ -24,28 +24,27 @@ RestJsonClient::getJson(String const &url) {
   lastFetchMs_ = now_ms;
 
   HTTPClient https;
-  // Begin request; must use Arduino String
+  // Begin request
   if (!https.begin(client_, url)) {
     https.end();
-    DEBUG_PRINTLN(String(F("SkyStrip: RestJsonClient::getJson: trouble initiating request")));
+    DEBUG_PRINTLN(F("SkyStrip: RestJsonClient::getJson: trouble initiating request"));
     return nullptr;
   }
   int code = https.GET();
   if (code <= 0) {
     https.end();
-    DEBUG_PRINTLN(String(F("SkyStrip: RestJsonClient::getJson: https get error code: ")) + code);
+    DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: https get error code: %d\n", code);
     return nullptr;
   }
 
   int len = https.getSize();
-  size_t capacity = (len > 0 ? len : 1024) * 2;  // fallback if size is unknown
-  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: allocating %u bytes, free heap before deserialization: %u\n", capacity, ESP.getFreeHeap());
-  auto doc = ::make_unique<DynamicJsonDocument>(capacity);
-  auto err = deserializeJson(*doc, https.getStream());
+  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: expecting up to %d bytes, free heap before deserialization: %u\n", len, ESP.getFreeHeap());
+  doc_.clear();
+  auto err = deserializeJson(doc_, https.getStream());
   https.end();
   if (err) {
     DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: deserialization error: %s; free heap: %u\n", err.c_str(), ESP.getFreeHeap());
     return nullptr;
   }
-  return doc;
+  return &doc_;
 }

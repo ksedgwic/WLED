@@ -1,6 +1,7 @@
 #pragma once
 
-#include <memory>
+// Lightweight REST client that reuses a fixed JSON buffer to avoid
+// heap fragmentation caused by repeated allocations.
 
 #include "WiFiClientSecure.h"
 #include "wled.h"
@@ -16,14 +17,17 @@ public:
   RestJsonClient();
   virtual ~RestJsonClient() = default;
 
-  std::unique_ptr<DynamicJsonDocument> getJson(String const &url);
+  // Returns pointer to internal document on success, nullptr on failure.
+  DynamicJsonDocument* getJson(const char* url);
 
   void resetRateLimit();
 
 protected:
   static constexpr unsigned RATE_LIMIT_MS = 10u * 1000u; // 10 seconds
+  static constexpr size_t MAX_JSON_SIZE = 32 * 1024;      // 32kB fixed buffer
 
 private:
   WiFiClientSecure client_;
   unsigned long lastFetchMs_;
+  DynamicJsonDocument doc_;
 };
