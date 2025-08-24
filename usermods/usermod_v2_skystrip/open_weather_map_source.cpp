@@ -1,6 +1,10 @@
 #include <limits>
 #include <cstdlib>
+#include <cstdio>
 #include <cmath>
+#include <cstring>
+#include <cctype>
+#include <strings.h>
 
 #include "open_weather_map_source.h"
 #include "skymodel.h"
@@ -27,67 +31,71 @@ const char CFG_INTERVAL_SEC[] = "IntervalSec";
 const char CFG_LOCATION[] = "Location";
 
 // keep commas; encode spaces etc.
-static String urlEncode(const String& s) {
+static void urlEncode(const char* src, char* dst, size_t dstSize) {
   static const char hex[] = "0123456789ABCDEF";
-  String out; out.reserve(s.length()*3);
-  for (size_t i = 0; i < s.length(); ++i) {
-    uint8_t c = (uint8_t)s[i];
-    if ((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||
-        c=='-'||c=='_'||c=='.'||c=='~'||c==',')
-      out += (char)c;
-    else if (c==' ') out += "%20";
-    else { out += '%'; out += hex[c>>4]; out += hex[c&0xF]; }
+  size_t di = 0;
+  for (size_t i = 0; src[i] && di + 4 < dstSize; ++i) {
+    unsigned char c = static_cast<unsigned char>(src[i]);
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+        c == '~' || c == ',') {
+      dst[di++] = c;
+    } else if (c == ' ') {
+      dst[di++] = '%'; dst[di++] = '2'; dst[di++] = '0';
+    } else {
+      dst[di++] = '%'; dst[di++] = hex[c >> 4]; dst[di++] = hex[c & 0xF];
+    }
   }
-  return out;
+  dst[di] = '\0';
 }
 
-// Normalize "Oakland, CA, USA" → "Oakland,CA,US"
-static String normalizeLocation(String q) {
-  q.trim();
-  q.replace(" ", "");
-  q.replace(",USA", ",US");
-  return q;
+// Normalize "Oakland, CA, USA" → "Oakland,CA,US" in-place
+static void normalizeLocation(char* q) {
+  // trim spaces and commas
+  size_t len = strlen(q);
+  char* out = q;
+  for (size_t i = 0; i < len; ++i) {
+    if (q[i] != ' ') *out++ = q[i];
+  }
+  *out = '\0';
+  len = strlen(q);
+  if (len >= 4 && strcasecmp(q + len - 4, ",USA") == 0) {
+    q[len - 2] = 'U';
+    q[len - 1] = 'S';
+    q[len] = '\0';
+  }
 }
 
-static bool parseCoordToken(String token, double& out) {
-  token.trim();
-  token.toLowerCase();
+static bool parseCoordToken(char* token, double& out) {
+  while (isspace(*token)) ++token;
   bool neg = false;
-  if (token.startsWith("s") || token.startsWith("w")) {
-    neg = true;
-    token.remove(0, 1);
-  } else if (token.startsWith("n") || token.startsWith("e")) {
-    token.remove(0, 1);
+  if (*token == 's' || *token == 'S' || *token == 'w' || *token == 'W') {
+    neg = true; ++token;
+  } else if (*token == 'n' || *token == 'N' || *token == 'e' || *token == 'E') {
+    ++token;
   }
-  token.trim();
-  if (token.endsWith("s") || token.endsWith("w")) {
-    neg = true;
-    token.remove(token.length() - 1);
-  } else if (token.endsWith("n") || token.endsWith("e")) {
-    token.remove(token.length() - 1);
+  while (isspace(*token)) ++token;
+  char* end = token + strlen(token);
+  while (end > token && isspace(end[-1])) --end;
+  if (end > token) {
+    char c = end[-1];
+    if (c == 's' || c == 'S' || c == 'w' || c == 'W') { neg = true; --end; }
+    else if (c == 'n' || c == 'N' || c == 'e' || c == 'E') { --end; }
   }
-  token.trim();
-  token.replace("°", " ");
-  token.replace("\"", " ");
-  token.replace("'", " ");
-  token.trim();
-  char* end = nullptr;
-  double deg = strtod(token.c_str(), &end);
-  if (end == token.c_str()) return false;
-  bool negNum = deg < 0;
-  deg = fabs(deg);
-  String rest(end);
-  rest.trim();
+  *end = '\0';
+  for (char* p = token; *p; ++p) {
+    if (*p == '\"' || *p == '\'' ) *p = ' ';
+    if ((unsigned char)*p == 0xC2 || (unsigned char)*p == 0xB0) *p = ' ';
+  }
+  char* rest = nullptr;
+  double deg = strtod(token, &rest);
+  if (rest == token) return false;
+  bool negNum = deg < 0; deg = fabs(deg);
   double min = 0, sec = 0;
-  if (rest.length() > 0) {
-    char* end2 = nullptr;
-    min = strtod(rest.c_str(), &end2);
-    if (end2 != rest.c_str()) {
-      String rest2(end2);
-      rest2.trim();
-      if (rest2.length() > 0) {
-        sec = strtod(rest2.c_str(), &end2);
-      }
+  if (*rest) {
+    min = strtod(rest, &rest);
+    if (*rest) {
+      sec = strtod(rest, &rest);
     }
   }
   if (negNum) neg = true;
@@ -96,22 +104,21 @@ static bool parseCoordToken(String token, double& out) {
   return true;
 }
 
-static bool parseLatLon(String s, double& lat, double& lon) {
-  s.trim();
-  int comma = s.indexOf(',');
-  String a, b;
-  if (comma >= 0) {
-    a = s.substring(0, comma);
-    b = s.substring(comma + 1);
+static bool parseLatLon(const char* s, double& lat, double& lon) {
+  char buf[64];
+  strncpy(buf, s, sizeof(buf));
+  buf[sizeof(buf)-1] = '\0';
+  char *a = nullptr, *b = nullptr;
+  char *comma = strchr(buf, ',');
+  if (comma) {
+    *comma = '\0';
+    a = buf; b = comma + 1;
   } else {
-    int space = s.lastIndexOf(' ');
-    if (space < 0) return false;
-    a = s.substring(0, space);
-    b = s.substring(space + 1);
+    char *space = strrchr(buf, ' ');
+    if (!space) return false;
+    *space = '\0';
+    a = buf; b = space + 1;
   }
-  a.trim();
-  b.trim();
-  if (a.length() == 0 || b.length() == 0) return false;
   if (!parseCoordToken(a, lat)) return false;
   if (!parseCoordToken(b, lon)) return false;
   return true;
@@ -163,7 +170,7 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
     lastLocation_ = location_;
     if (location_.length() > 0) {
       double lat = 0, lon = 0;
-      if (parseLatLon(String(location_.c_str()), lat, lon)) {
+      if (parseLatLon(location_.c_str(), lat, lon)) {
         latitude_ = lat;
         longitude_ = lon;
       } else if (running) {
@@ -182,13 +189,11 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
   return configComplete;
 }
 
-String OpenWeatherMapSource::composeApiUrl() {
-  char buf[1024];
-  (void)snprintf(buf, sizeof(buf), "%s&lat=%.6f&lon=%.6f&appid=%s",
+void OpenWeatherMapSource::composeApiUrl(char* buf, size_t len) const {
+  if (!buf || len == 0) return;
+  (void)snprintf(buf, len, "%s&lat=%.6f&lon=%.6f&appid=%s",
                  apiBase_.c_str(), latitude_, longitude_, apiKey_.c_str());
-  // optional: guard against overflow
-  buf[sizeof(buf) - 1] = '\0';
-  return String(buf);
+  buf[len - 1] = '\0';
 }
 
 std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
@@ -199,8 +204,9 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
   lastFetch_ = now;
 
   // Fetch JSON
-  String url = composeApiUrl();
-  DEBUG_PRINTF("SkyStrip: %s::fetch URL: %s\n", name().c_str(), url.c_str());
+  char url[256];
+  composeApiUrl(url, sizeof(url));
+  DEBUG_PRINTF("SkyStrip: %s::fetch URL: %s\n", name().c_str(), url);
 
   auto doc = getJson(url);
   if (!doc) {
@@ -227,8 +233,9 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
       bool night = false;
       JsonArray wArrCur = cur["weather"].as<JsonArray>();
       if (!wArrCur.isNull() && wArrCur.size() > 0) {
-        String icon = wArrCur[0]["icon"] | String("");
-        if (icon.endsWith("n")) night = true;
+        const char* icon = wArrCur[0]["icon"] | "";
+        size_t ilen = strlen(icon);
+        if (ilen > 0 && icon[ilen-1] == 'n') night = true;
       }
       if (night) {
         sunrise = std::numeric_limits<time_t>::max();
@@ -265,11 +272,11 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::fetch(std::time_t now) {
       if (v > 0.0) hasSnow = true;
     }
     if (!hasRain && !hasSnow && !wArr.isNull() && wArr.size() > 0) {
-      String main = wArr[0]["main"] | String("");
-      main.toLowerCase();
-      if (main == F("rain") || main == F("drizzle") || main == F("thunderstorm"))
+      const char* main = wArr[0]["main"] | "";
+      if (strcasecmp(main, "rain") == 0 || strcasecmp(main, "drizzle") == 0 ||
+          strcasecmp(main, "thunderstorm") == 0)
         hasRain = true;
-      else if (main == F("snow"))
+      else if (strcasecmp(main, "snow") == 0)
         hasSnow = true;
     }
     int ptype = hasRain && hasSnow ? 3 : (hasSnow ? 2 : (hasRain ? 1 : 0));
@@ -289,12 +296,11 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::checkhistory(time_t now, std::ti
   if (oldestTstamp <= now - HISTORY_SEC) return nullptr;
 
   time_t fetchDt = oldestTstamp - 3600;
-  char buf[256];
-  snprintf(buf, sizeof(buf),
+  char url[256];
+  snprintf(url, sizeof(url),
            "https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=%.6f&lon=%.6f&dt=%ld&units=imperial&appid=%s",
            latitude_, longitude_, (long)fetchDt, apiKey_.c_str());
-  String url(buf);
-  DEBUG_PRINTF("SkyStrip: %s::checkhistory URL: %s\n", name().c_str(), url.c_str());
+  DEBUG_PRINTF("SkyStrip: %s::checkhistory URL: %s\n", name().c_str(), url);
 
   auto doc = getJson(url);
   if (!doc) {
@@ -334,11 +340,11 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::checkhistory(time_t now, std::ti
       if (v > 0.0) hasSnow = true;
     }
     if (!hasRain && !hasSnow && !wArr.isNull() && wArr.size() > 0) {
-      String main = wArr[0]["main"] | String("");
-      main.toLowerCase();
-      if (main == F("rain") || main == F("drizzle") || main == F("thunderstorm"))
+      const char* main = wArr[0]["main"] | "";
+      if (strcasecmp(main, "rain") == 0 || strcasecmp(main, "drizzle") == 0 ||
+          strcasecmp(main, "thunderstorm") == 0)
         hasRain = true;
-      else if (main == F("snow"))
+      else if (strcasecmp(main, "snow") == 0)
         hasSnow = true;
     }
     int ptype = hasRain && hasSnow ? 3 : (hasSnow ? 2 : (hasRain ? 1 : 0));
@@ -366,13 +372,18 @@ bool OpenWeatherMapSource::geocodeOWM(std::string const & rawQuery,
                                       int* outMatches)
 {
   lat = lon = 0;
-  String q = normalizeLocation(String(rawQuery.c_str()));
-  if (q.isEmpty()) { if (outMatches) *outMatches = 0; return false; }
+  char q[128];
+  strncpy(q, rawQuery.c_str(), sizeof(q));
+  q[sizeof(q)-1] = '\0';
+  normalizeLocation(q);
+  if (q[0] == '\0') { if (outMatches) *outMatches = 0; return false; }
 
-  String url = F("https://api.openweathermap.org/geo/1.0/direct?q=");
-  url += urlEncode(q);
-  url += F("&limit=5&appid=");
-  url += apiKey_.c_str();
+  char enc[256];
+  urlEncode(q, enc, sizeof(enc));
+  char url[512];
+  snprintf(url, sizeof(url),
+           "https://api.openweathermap.org/geo/1.0/direct?q=%s&limit=5&appid=%s",
+           enc, apiKey_.c_str());
 
   auto doc = getJson(url);
   resetRateLimit();	// we want to do a fetch immediately after ...

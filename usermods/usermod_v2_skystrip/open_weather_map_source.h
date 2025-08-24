@@ -27,7 +27,7 @@ public:
                       bool& invalidate_history) override;
   const char* configKey() const override { return "OpenWeatherMap"; }
 
-  String composeApiUrl();
+  void composeApiUrl(char* buf, size_t len) const;
   bool geocodeOWM(std::string const& rawQuery, double& lat, double& lon, int* outMatches = nullptr);
 
 private:
