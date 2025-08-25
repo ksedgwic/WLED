@@ -99,3 +99,14 @@ void PlatformView::view(std::time_t now, const BartStationModel &model,
     break;
   }
 }
+
+void PlatformView::appendConfigData(Print &s) {
+  // 4th arg (pre) = BEFORE input -> keep (-1 disables) right next to the field
+  // 3rd arg (post) = AFTER input -> show the destinations note, visually separated
+  s.print(F("addInfo('BartDepart2:"));
+  s.print(configKey()); // e.g. "PlatformView1"
+  s.print(F(":SegmentId',1,"
+            "'<div style=\\'margin-top:12px;\\'>this is a placeholder for destinations</div>',"
+            "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
+            ");"));
+}
