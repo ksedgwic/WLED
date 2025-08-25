@@ -22,12 +22,21 @@ void BartStationModel::Platform::update(const JsonObject& root) {
       if (!station["etd"].is<JsonArray>()) continue;
       for (JsonObject etd : station["etd"].as<JsonArray>()) {
         if (!etd["estimate"].is<JsonArray>()) continue;
+        bool matches = false;
         for (JsonObject est : etd["estimate"].as<JsonArray>()) {
           if (String(est["platform"] | "0") != platformId_) continue;
+          matches = true;
           int mins = atoi(est["minutes"] | "0");
           time_t dep = batch.apiTs + mins * 60;
           TrainColor col = parseTrainColor(est["color"] | "");
           batch.etds.push_back(ETD{dep, col});
+        }
+        if (matches) {
+          String dest = etd["destination"] | "";
+          if (!dest.isEmpty()) {
+            auto it = std::find(destinations_.begin(), destinations_.end(), dest);
+            if (it == destinations_.end()) destinations_.push_back(dest);
+          }
         }
       }
     }
@@ -50,6 +59,11 @@ void BartStationModel::Platform::merge(const Platform& other) {
     history_.push_back(b);
     if (history_.size() > 5) history_.pop_front();
   }
+
+  for (auto const& d : other.destinations_) {
+    auto it = std::find(destinations_.begin(), destinations_.end(), d);
+    if (it == destinations_.end()) destinations_.push_back(d);
+  }
 }
 
 time_t BartStationModel::Platform::oldest() const {
@@ -64,6 +78,10 @@ const String& BartStationModel::Platform::platformId() const {
 const std::deque<BartStationModel::Platform::ETDBatch>&
 BartStationModel::Platform::history() const {
   return history_;
+}
+
+const std::vector<String>& BartStationModel::Platform::destinations() const {
+  return destinations_;
 }
 
 String BartStationModel::Platform::toString() const {
@@ -142,3 +160,11 @@ time_t BartStationModel::oldest() const {
   return oldest;
 }
 
+std::vector<String> BartStationModel::destinationsForPlatform(const String& platformId) const {
+  for (auto const& p : platforms) {
+    if (p.platformId() == platformId) {
+      return p.destinations();
+    }
+  }
+  return {};
+}

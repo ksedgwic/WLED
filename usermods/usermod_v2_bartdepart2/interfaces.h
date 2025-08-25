@@ -51,4 +51,9 @@ public:
 
   /// Append DebugPixel info
   virtual void appendDebugPixel(Print& s) const = 0;
+
+  /// Append config page info, optionally using the latest model data
+  virtual void appendConfigData(Print& s, const ModelType* model) {
+    IConfigurable::appendConfigData(s);
+  }
 };
