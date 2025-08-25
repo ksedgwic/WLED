@@ -95,6 +95,16 @@ void BartDepart2::addToConfig(JsonObject& root) {
   }
 }
 
+void BartDepart2::appendConfigData(Print& s) {
+  for (auto& src : sources_) {
+    src->appendConfigData(s);
+  }
+
+  for (auto& vw : views_) {
+    vw->appendConfigData(s);
+  }
+}
+
 bool BartDepart2::readFromConfig(JsonObject& root) {
   JsonObject top = root[FPSTR(CFG_NAME)];
   if (top.isNull()) return false;

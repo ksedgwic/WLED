@@ -9,6 +9,7 @@
 struct IConfigurable {
   virtual ~IConfigurable() = default;
   virtual void addToConfig(JsonObject& root) = 0;
+  virtual void appendConfigData(Print& s) {}
   virtual bool readFromConfig(JsonObject& root,
                               bool startup_complete,
                               bool& invalidate_history) = 0;
@@ -47,4 +48,7 @@ public:
 
   /// Identify the view (optional)
   virtual std::string name() const = 0;
+
+  /// Append DebugPixel info
+  virtual void appendDebugPixel(Print& s) const = 0;
 };
