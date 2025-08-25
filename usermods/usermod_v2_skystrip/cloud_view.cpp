@@ -101,7 +101,8 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
   constexpr float kDaySat = 0.30f;
   constexpr float kNightSat = 0.00f;
   constexpr float kDayVMax  = 0.40f;
-  constexpr float kNightVMax= 0.30f;
+  // slightly higher night maximum so low clouds are more visible
+  constexpr float kNightVMax= 0.40f;
 
   // Brightness floor as a fraction of Vmax so mid/low clouds stay visible.
   constexpr float kDayVMinFrac   = 0.50f;  // try 0.40–0.60 to taste
@@ -169,7 +170,8 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
       }
       float vmax = daytime ? kDayVMax : kNightVMax;
       float vmin = (daytime ? kDayVMinFrac : kNightVMinFrac) * vmax;
-      val  = vmin + (vmax - vmin) * clouds01;  // floor-boosted brightness
+      // Use sqrt curve to boost brightness at lower cloud coverage
+      val  = vmin + (vmax - vmin) * sqrtf(clouds01);
       hue = daytime ? kDayHue : kNightHue;
       sat = daytime ? kDaySat : kNightSat;
     }
