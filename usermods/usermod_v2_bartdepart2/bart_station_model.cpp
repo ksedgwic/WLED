@@ -83,11 +83,14 @@ String BartStationModel::Platform::toString() const {
   out += lagSecs;
   out += ":";
 
+  time_t prevTs = batch.ourTs;
+
   for (const auto& e : etds) {
     out += " +";
-    int diff = e.estDep - batch.ourTs;
+    int diff = e.estDep - prevTs;
     out += diff / 60;
     out += " (";
+    prevTs = e.estDep;
 
     char depBuf[20];
     util::fmt_local(depBuf, sizeof(depBuf), e.estDep, "%H:%M:%S");
