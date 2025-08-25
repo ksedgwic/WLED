@@ -100,13 +100,27 @@ void PlatformView::view(std::time_t now, const BartStationModel &model,
   }
 }
 
-void PlatformView::appendConfigData(Print &s) {
+void PlatformView::appendConfigData(Print &s, const BartStationModel *model) {
   // 4th arg (pre) = BEFORE input -> keep (-1 disables) right next to the field
   // 3rd arg (post) = AFTER input -> show the destinations note, visually separated
   s.print(F("addInfo('BartDepart2:"));
   s.print(configKey()); // e.g. "PlatformView1"
-  s.print(F(":SegmentId',1,"
-            "'<div style=\\'margin-top:12px;\\'>this is a placeholder for destinations</div>',"
-            "'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"
-            ");"));
+  s.print(F(":SegmentId',1,'<div style=\\'margin-top:12px;\\'>"));
+  if (model) {
+    auto dests = model->destinationsForPlatform(platformId_);
+    if (!dests.empty()) {
+      s.print(F("Destinations: "));
+      for (size_t i = 0; i < dests.size(); ++i) {
+        if (i) s.print(F(", "));
+        s.print(dests[i]);
+      }
+    } else {
+      s.print(F("No destinations known"));
+    }
+  } else {
+    s.print(F("No destinations known"));
+  }
+  s.print(F("</div>',"));
+  s.print(F("'&nbsp;<small style=\\'opacity:.8\\'>(-1 disables)</small>'"));
+  s.println(F(");"));
 }

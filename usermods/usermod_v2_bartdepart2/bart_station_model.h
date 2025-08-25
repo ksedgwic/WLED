@@ -27,11 +27,13 @@ struct BartStationModel {
     time_t oldest() const;
     const String& platformId() const;
     const std::deque<ETDBatch>& history() const;
+    const std::vector<String>& destinations() const;
     String toString() const;
 
    private:
     String platformId_;
     std::deque<ETDBatch> history_;
+    std::vector<String> destinations_;
 
     // return UTC tstamp
     time_t parseHeaderTimestamp(const char* dateStr, const char* timeStr) const;
@@ -41,4 +43,5 @@ struct BartStationModel {
 
   void update(std::time_t now, BartStationModel&& delta);
   time_t oldest() const;
+  std::vector<String> destinationsForPlatform(const String& platformId) const;
 };

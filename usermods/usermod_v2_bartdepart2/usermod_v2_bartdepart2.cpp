@@ -101,7 +101,7 @@ void BartDepart2::appendConfigData(Print& s) {
   }
 
   for (auto& vw : views_) {
-    vw->appendConfigData(s);
+    vw->appendConfigData(s, model_.get());
   }
 }
 

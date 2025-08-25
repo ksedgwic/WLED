@@ -18,7 +18,8 @@ public:
   void view(std::time_t now, const BartStationModel& model, int16_t dbgPixelIndex) override;
   void appendDebugPixel(Print& s) const override { /* empty */ }
   void addToConfig(JsonObject& root) override { root["SegmentId"] = segmentId_; }
-  void appendConfigData(Print& s) override;
+  void appendConfigData(Print& s) override { appendConfigData(s, nullptr); }
+  void appendConfigData(Print& s, const BartStationModel* model) override;
   bool readFromConfig(JsonObject& root, bool startup_complete, bool& invalidate_history) override {
     return getJsonValue(root["SegmentId"], segmentId_, segmentId_);
   }
