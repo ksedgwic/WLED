@@ -64,12 +64,12 @@ void PlatformView::view(std::time_t now, const BartStationModel &model,
       uint16_t bestB = 0;
 
       for (auto &e : batch.etds) {
-        float diffMin = float(updateSecs_ + e.estDep - now) / 60.0f;
-        if (diffMin < 0 || diffMin >= len)
+        float diff = float(updateSecs_ + e.estDep - now) * len / 3600.0f;
+        if (diff < 0.0f || diff >= len)
           continue;
 
-        int idx = int(floor(diffMin));
-        float frac = diffMin - float(idx);
+        int idx = int(floor(diff));
+        float frac = diff - float(idx);
 
         uint8_t b = 0;
         if (i == idx) {
