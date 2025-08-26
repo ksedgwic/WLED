@@ -138,7 +138,7 @@ void TemperatureView::view(time_t now, SkyModel const &model,
     double dewF = 0.f;
     float hue = 0.f;
     float sat = 1.0f;
-    constexpr float val = 0.7f;
+    constexpr float val = 0.5f;
     uint32_t col = 0;
     if (util::estimateTempAt(model, t, step, tempF)) {
       hue = hueForTempF(tempF);
