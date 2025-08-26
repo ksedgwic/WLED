@@ -29,6 +29,7 @@ DynamicJsonDocument* RestJsonClient::getJson(const char* url) {
     DEBUG_PRINTLN(F("SkyStrip: RestJsonClient::getJson: trouble initiating request"));
     return nullptr;
   }
+  DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: free heap before GET: %u\n", ESP.getFreeHeap());
   int code = https_.GET();
   if (code <= 0) {
     https_.end();
