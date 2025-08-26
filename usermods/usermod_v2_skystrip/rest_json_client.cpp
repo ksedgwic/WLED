@@ -23,25 +23,24 @@ DynamicJsonDocument* RestJsonClient::getJson(const char* url) {
   }
   lastFetchMs_ = now_ms;
 
-  HTTPClient https;
   // Begin request
-  if (!https.begin(client_, url)) {
-    https.end();
+  if (!https_.begin(client_, url)) {
+    https_.end();
     DEBUG_PRINTLN(F("SkyStrip: RestJsonClient::getJson: trouble initiating request"));
     return nullptr;
   }
-  int code = https.GET();
+  int code = https_.GET();
   if (code <= 0) {
-    https.end();
+    https_.end();
     DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: https get error code: %d\n", code);
     return nullptr;
   }
 
-  int len = https.getSize();
+  int len = https_.getSize();
   DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: expecting up to %d bytes, free heap before deserialization: %u\n", len, ESP.getFreeHeap());
   doc_.clear();
-  auto err = deserializeJson(doc_, https.getStream());
-  https.end();
+  auto err = deserializeJson(doc_, https_.getStream());
+  https_.end();
   if (err) {
     DEBUG_PRINTF("SkyStrip: RestJsonClient::getJson: deserialization error: %s; free heap: %u\n", err.c_str(), ESP.getFreeHeap());
     return nullptr;

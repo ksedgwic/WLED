@@ -28,6 +28,7 @@ protected:
 
 private:
   WiFiClientSecure client_;
+  HTTPClient https_;
   unsigned long lastFetchMs_;
   DynamicJsonDocument doc_;
 };
