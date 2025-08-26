@@ -21,7 +21,13 @@ std::unique_ptr<BartStationModel> LegacyBartSource::fetch(std::time_t now) {
   if (now == 0 || now < nextFetch_) return nullptr;
 
   String url = composeUrl(apiBase_, apiKey_, apiStation_);
-  https_.begin(client_, url);
+  if (!https_.begin(client_, url)) {
+    https_.end();
+    DEBUG_PRINTLN(F("BartDepart: LegacyBartSource::fetch: trouble initiating request"));
+    nextFetch_ = now + updateSecs_ * backoffMult_;
+    if (backoffMult_ < 16) backoffMult_ *= 2;
+    return nullptr;
+  }
   int httpCode = https_.GET();
   if (httpCode <= 0) {
     https_.end();
