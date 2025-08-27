@@ -384,6 +384,7 @@ bool OpenWeatherMapSource::geocodeOWM(std::string const & rawQuery,
   snprintf(url, sizeof(url),
            "%s/geo/1.0/direct?q=%s&limit=5&appid=%s",
            apiBase_.c_str(), enc, apiKey_.c_str());
+  DEBUG_PRINTF("SkyStrip: %s::geocodeOWM URL: %s\n", name().c_str(), url);
 
   auto doc = getJson(url);
   resetRateLimit();	// we want to do a fetch immediately after ...
