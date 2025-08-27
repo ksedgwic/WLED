@@ -66,7 +66,7 @@ Approximate temperature-to-hue mapping:
 | ≥100      | 0       | Red        |
 
 
-## Delta View (DV)
+## 24 Hour Delta View (DV)
 
 Hue represents the temperature change relative to the previous day:
 blues for cooling, greens for steady conditions, and yellows through
@@ -77,6 +77,15 @@ combining temperature and humidity shifts, so bright pixels flag
 larger swings. A dim blue pixel therefore means a slight cool‑down
 with more moisture, while a bright saturated red indicates rapid
 warming coupled with drying.
+
+Approximate mapping of day-to-day deltas to color attributes:
+
+| Temperature | Hue (Color) |    | Humidity   | Saturation |
+|-------------|-------------|    |------------|------------|
+| Cooling     | Blue tones  |    | More humid | Low/Pastel |
+| Steady      | Green       |    | Stable     | Medium     |
+| Warming     | Yellow→Red  |    | Drier      | High/Vivid |
+
 
 ## Test Pattern View (TP)
 
