@@ -165,15 +165,17 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
     } else {
       // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
-        strip.setPixelColor(idx, 0);
-        continue;
+        hue = 0.f;
+        sat = 0.f;
+        val = 0.f;
+      } else {
+        float vmax = daytime ? kDayVMax : kNightVMax;
+        float vmin = (daytime ? kDayVMinFrac : kNightVMinFrac) * vmax;
+        // Use sqrt curve to boost brightness at lower cloud coverage
+        val  = vmin + (vmax - vmin) * sqrtf(clouds01);
+        hue = daytime ? kDayHue : kNightHue;
+        sat = daytime ? kDaySat : kNightSat;
       }
-      float vmax = daytime ? kDayVMax : kNightVMax;
-      float vmin = (daytime ? kDayVMinFrac : kNightVMinFrac) * vmax;
-      // Use sqrt curve to boost brightness at lower cloud coverage
-      val  = vmin + (vmax - vmin) * sqrtf(clouds01);
-      hue = daytime ? kDayHue : kNightHue;
-      sat = daytime ? kDaySat : kNightSat;
     }
 
     uint32_t col = util::hsv2rgb(hue, sat, val);
