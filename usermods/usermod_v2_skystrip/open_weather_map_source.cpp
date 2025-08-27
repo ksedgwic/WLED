@@ -10,10 +10,7 @@
 #include "skymodel.h"
 #include "util.h"
 
-static constexpr const char* DEFAULT_API_BASE    =
-  "https://api.openweathermap.org/data/3.0/onecall"
-  "?exclude=minutely,daily,alerts"
-  "&units=imperial";
+static constexpr const char* DEFAULT_API_BASE = "https://api.openweathermap.org";
 static constexpr const char * DEFAULT_API_KEY = "";
 static constexpr const char * DEFAULT_LOCATION = "";
 static constexpr const double DEFAULT_LATITUDE = 37.80486;
@@ -191,7 +188,8 @@ bool OpenWeatherMapSource::readFromConfig(JsonObject &subtree,
 
 void OpenWeatherMapSource::composeApiUrl(char* buf, size_t len) const {
   if (!buf || len == 0) return;
-  (void)snprintf(buf, len, "%s&lat=%.6f&lon=%.6f&appid=%s",
+  (void)snprintf(buf, len,
+                 "%s/data/3.0/onecall?exclude=minutely,daily,alerts&units=imperial&lat=%.6f&lon=%.6f&appid=%s",
                  apiBase_.c_str(), latitude_, longitude_, apiKey_.c_str());
   buf[len - 1] = '\0';
 }
@@ -298,8 +296,8 @@ std::unique_ptr<SkyModel> OpenWeatherMapSource::checkhistory(time_t now, std::ti
   time_t fetchDt = oldestTstamp - 3600;
   char url[256];
   snprintf(url, sizeof(url),
-           "https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=%.6f&lon=%.6f&dt=%ld&units=imperial&appid=%s",
-           latitude_, longitude_, (long)fetchDt, apiKey_.c_str());
+           "%s/data/3.0/onecall/timemachine?lat=%.6f&lon=%.6f&dt=%ld&units=imperial&appid=%s",
+           apiBase_.c_str(), latitude_, longitude_, (long)fetchDt, apiKey_.c_str());
   DEBUG_PRINTF("SkyStrip: %s::checkhistory URL: %s\n", name().c_str(), url);
 
   auto doc = getJson(url);
@@ -382,8 +380,8 @@ bool OpenWeatherMapSource::geocodeOWM(std::string const & rawQuery,
   urlEncode(q, enc, sizeof(enc));
   char url[512];
   snprintf(url, sizeof(url),
-           "https://api.openweathermap.org/geo/1.0/direct?q=%s&limit=5&appid=%s",
-           enc, apiKey_.c_str());
+           "%s/geo/1.0/direct?q=%s&limit=5&appid=%s",
+           apiBase_.c_str(), enc, apiKey_.c_str());
 
   auto doc = getJson(url);
   resetRateLimit();	// we want to do a fetch immediately after ...
