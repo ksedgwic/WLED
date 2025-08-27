@@ -3,7 +3,8 @@
 // Lightweight REST client that reuses a fixed JSON buffer to avoid
 // heap fragmentation caused by repeated allocations.
 
-#include "WiFiClientSecure.h"
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include "wled.h"
 
 #if defined(ARDUINO_ARCH_ESP8266)
@@ -27,8 +28,7 @@ protected:
   static constexpr size_t MAX_JSON_SIZE = 32 * 1024;      // 32kB fixed buffer
 
 private:
-  WiFiClientSecure client_;
-  HTTPClient https_;
+  HTTPClient http_;
   unsigned long lastFetchMs_;
   DynamicJsonDocument doc_;
 };
