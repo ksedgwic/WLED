@@ -376,6 +376,8 @@ bool OpenWeatherMapSource::geocodeOWM(std::string const & rawQuery,
   normalizeLocation(q);
   if (q[0] == '\0') { if (outMatches) *outMatches = 0; return false; }
 
+  resetRateLimit();	// we might have done a fetch right before
+
   char enc[256];
   urlEncode(q, enc, sizeof(enc));
   char url[512];
