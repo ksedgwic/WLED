@@ -50,7 +50,7 @@ static inline float intensityFromDeltas(double tempDelta, float humidDelta) {
   constexpr float kMaxHumDelta = 15.0f;  // +/-15F covers typical humidity range
   float uT = util::clamp01(float(std::fabs(tempDelta)) / kMaxTempDelta);
   float uH = util::clamp01(std::fabs(humidDelta) / kMaxHumDelta);
-  return util::clamp01(std::sqrt(uT * uT + uH * uH)) * 0.7;
+  return util::clamp01(std::sqrt(uT * uT + uH * uH)) * 0.9;
 }
 
 DeltaView::DeltaView() : segId_(DEFAULT_SEG_ID) {
