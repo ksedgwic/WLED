@@ -11,6 +11,7 @@
 ## Build, Test, and Development Commands
 - Build firmware: `pio run -e esp32dev` (choose an env from `platformio.ini`).
 - DepartStrip usermod: always build after changes with `pio run -e departstrip_debug` from the top-level WLED directory.
+- SkyStrip usermod: always rebuild with `pio run -e skystrip_debug` whenever changes could affect it.
 - Flash device: `pio run -e esp32dev -t upload` (connect board via USB).
 - Serial monitor: `pio device monitor -b 115200`.
 - Build web assets: `npm ci && npm run build` (compiles/minifies `wled00/data/`). For live iteration: `npm run dev`.
