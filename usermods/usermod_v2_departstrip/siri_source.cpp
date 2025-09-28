@@ -463,6 +463,7 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
 
 void SiriSource::addToConfig(JsonObject& root) {
   root["Enabled"] = enabled_;
+  root["Type"] = F("siri");
   root["UpdateSecs"] = updateSecs_;
   root["TemplateUrl"] = baseUrl_;
   root["ApiKey"] = apiKey_;

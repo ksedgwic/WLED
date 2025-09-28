@@ -2,6 +2,7 @@
 #include <ctime>
 #include <memory>
 #include <algorithm>
+#include <cstring>
 
 #include "usermod_v2_departstrip.h"
 #include "interfaces.h"
@@ -9,6 +10,7 @@
 
 #include "depart_model.h"
 #include "siri_source.h"
+#include "gtfsrt_source.h"
 #include "departure_view.h"
 
 const char CFG_NAME[] PROGMEM = "DepartStrip";
@@ -19,6 +21,25 @@ REGISTER_USERMOD(departstrip_usermod);
 
 // Delay after boot (milliseconds) to allow disabling before heavy work
 static const uint32_t SAFETY_DELAY_MS = 10u * 1000u;
+
+namespace {
+String normalizeSourceType(const String& raw) {
+  String t = raw;
+  t.trim();
+  t.toLowerCase();
+  if (t.length() == 0) t = F("siri");
+  if (t == F("gtfs-rt")) t = F("gtfsrt");
+  return t;
+}
+
+std::unique_ptr<IDataSourceT<DepartModel>> makeSourceForType(const String& type, const char* key) {
+  String norm = normalizeSourceType(type);
+  if (norm == F("gtfsrt")) {
+    return ::make_unique<GtfsRtSource>(key);
+  }
+  return ::make_unique<SiriSource>(key, nullptr, nullptr, nullptr);
+}
+} // namespace
 
 DepartStrip::DepartStrip() {
   sources_.reserve(4);
@@ -95,8 +116,7 @@ void DepartStrip::addToConfig(JsonObject& root) {
   struct SrcRef { String key; IDataSourceT<DepartModel>* ptr; };
   std::vector<SrcRef> sorder; sorder.reserve(sources_.size());
   for (auto& up : sources_) {
-    SiriSource* ss = static_cast<SiriSource*>(up.get());
-    String k = ss ? ss->sourceKey() : String();
+    String k = up->sourceKey();
     sorder.push_back(SrcRef{k, up.get()});
   }
   std::sort(sorder.begin(), sorder.end(), [](const SrcRef& a, const SrcRef& b){ return a.key.compareTo(b.key) < 0; });
@@ -110,6 +130,7 @@ void DepartStrip::addToConfig(JsonObject& root) {
   {
     JsonObject ns = top.createNestedObject("NewSource");
     ns["Enabled"] = false;
+    ns["Type"] = F("siri");
     ns["UpdateSecs"] = 60;
     ns["TemplateUrl"] = "";
     ns["ApiKey"] = "";
@@ -168,8 +189,8 @@ void DepartStrip::appendConfigData(Print& s) {
 
   // Per-source Stop name and current-route swatches (anchor below Delete)
   for (auto& src : sources_) {
+    if (strcmp(src->sourceType(), "siri") != 0) continue;
     SiriSource* ss = static_cast<SiriSource*>(src.get());
-    if (!ss) continue;
     // Collect current lines seen for this stop from the model
     const String& agency = ss->agency();
     std::vector<String> lines;
@@ -273,7 +294,9 @@ bool DepartStrip::readFromConfig(JsonObject& root) {
                       (obj.containsKey("UpdateSecs") || obj.containsKey("TemplateUrl") || obj.containsKey("BaseUrl") || obj.containsKey("ApiKey") ||
                        obj.containsKey("Agency") || obj.containsKey("StopCode"));
       if (isSource) {
-        auto snew = ::make_unique<SiriSource>(secName, nullptr, nullptr, nullptr);
+        String type = normalizeSourceType(obj["Type"] | "");
+        auto snew = makeSourceForType(type, secName);
+        if (!snew) continue;
         bool dummy = false;
         ok &= snew->readFromConfig(obj, startup_complete, dummy);
         sources_.push_back(std::move(snew));
@@ -306,8 +329,7 @@ bool DepartStrip::readFromConfig(JsonObject& root) {
     std::vector<size_t> delIdx;
     std::vector<String> seen;
     for (size_t i = 0; i < sources_.size(); ++i) {
-      SiriSource* ss = static_cast<SiriSource*>(sources_[i].get());
-      String k = ss ? ss->sourceKey() : String();
+      String k = sources_[i]->sourceKey();
       bool dup = false;
       for (auto& sk : seen) if (sk == k) { dup = true; break; }
       if (dup) delIdx.push_back(i); else seen.push_back(k);
@@ -350,19 +372,24 @@ bool DepartStrip::readFromConfig(JsonObject& root) {
       // avoid duplicate by Key
       bool existsKey = false;
       for (auto& s : sources_) {
-        SiriSource* ss = static_cast<SiriSource*>(s.get());
-        if (ss && ss->sourceKey() == nsKey) { existsKey = true; break; }
+        if (s->sourceKey() == nsKey) { existsKey = true; break; }
       }
       if (!existsKey) {
+        String type = normalizeSourceType(ns["Type"] | "");
         // Generate unique configKey like "siri_sourceN"
         int next = 1;
         auto exists = [&](const char* k){ String kk(k); for (auto& s : sources_) if (String(s->configKey()) == kk) return true; return false; };
         String cfg;
-        do { cfg = String(F("siri_source")); cfg += next++; } while (exists(cfg.c_str()));
-        auto snew = ::make_unique<SiriSource>(cfg.c_str(), nullptr, nullptr, nullptr);
-        bool dummy = false;
-        ok &= snew->readFromConfig(ns, startup_complete, dummy);
-        sources_.push_back(std::move(snew));
+        do {
+          cfg = (type == F("gtfsrt")) ? String(F("gtfsrt_source")) : String(F("siri_source"));
+          cfg += next++;
+        } while (exists(cfg.c_str()));
+        auto snew = makeSourceForType(type, cfg.c_str());
+        if (snew) {
+          bool dummy = false;
+          ok &= snew->readFromConfig(ns, startup_complete, dummy);
+          sources_.push_back(std::move(snew));
+        }
       } else {
         DEBUG_PRINTF("DepartStrip: NewSource ignored, duplicate Key %s\n", nsKey.c_str());
       }
