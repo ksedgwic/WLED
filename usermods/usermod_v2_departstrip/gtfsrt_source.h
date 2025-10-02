@@ -5,6 +5,7 @@
 #include "util.h"
 #include "wled.h"
 #include <WiFiClient.h>
+#include <vector>
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266HTTPClient.h>
 #else
@@ -19,7 +20,7 @@ private:
   String   baseUrl_;
   String   apiKey_;
   String   agency_;
-  String   stopCode_;
+  std::vector<String> stopCodes_;
   time_t   nextFetch_ = 0;
   uint8_t  backoffMult_ = 1;
   time_t   lastBackoffLog_ = 0;
@@ -41,6 +42,7 @@ public:
   const char* configKey() const override { return configKey_.c_str(); }
 
   const String& agency() const { return agency_; }
+  const std::vector<String>& stopCodes() const { return stopCodes_; }
 
 private:
   String composeUrl(const String& agency, const String& stopCode) const;
