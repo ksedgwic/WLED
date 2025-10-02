@@ -1,5 +1,598 @@
 #include "gtfsrt_source.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <memory>
+#include <limits>
+#include <string>
+#include <vector>
+#include <utility>
+
+#include <pb_decode.h>
+
+namespace {
+
+// Trim leading and trailing ASCII whitespace from a std::string.
+static void trimStringInPlace(std::string& s) {
+  size_t begin = 0;
+  while (begin < s.size() && std::isspace(static_cast<unsigned char>(s[begin]))) ++begin;
+  size_t end = s.size();
+  while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+  if (begin == 0 && end == s.size()) return;
+  s = s.substr(begin, end - begin);
+}
+
+// Lowercase a string (ASCII) for case-insensitive comparisons.
+static std::string toLowerCopy(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  return out;
+}
+
+struct ParseContext {
+  String agency;
+  String stopCode;
+  std::string stopCodeStd;
+  std::string stopCodeLower;
+  std::string stopCodeShort;
+  std::string stopCodeShortLower;
+  time_t now;
+  time_t apiTimestamp = 0;
+  size_t feedEntityCount = 0;
+  size_t tripUpdateCount = 0;
+  size_t tripUpdateMatched = 0;
+  size_t stopUpdatesTotal = 0;
+  size_t stopUpdatesMatched = 0;
+  size_t bytesRead = 0;
+  size_t logMatches = 0;
+  std::vector<DepartModel::Entry::Item> items;
+
+  ParseContext(const String& agencyIn, const String& stopIn, time_t nowIn)
+    : agency(agencyIn), stopCode(stopIn), stopCodeStd(stopIn.c_str()), now(nowIn) {
+    trimStringInPlace(stopCodeStd);
+    stopCodeLower = toLowerCopy(stopCodeStd);
+    size_t colon = stopCodeStd.find(':');
+    if (colon != std::string::npos && colon + 1 < stopCodeStd.size()) {
+      stopCodeShort = stopCodeStd.substr(colon + 1);
+      trimStringInPlace(stopCodeShort);
+      stopCodeShortLower = toLowerCopy(stopCodeShort);
+    }
+    items.reserve(16);
+  }
+};
+
+struct TripAccumulator {
+  struct PendingStop {
+    int64_t epoch = 0;
+    bool hasSequence = false;
+    uint32_t stopSequence = 0;
+  };
+  struct TripInfo {
+    std::string routeId;
+    std::string tripId;
+  } trip;
+  std::vector<PendingStop> matches;
+
+  TripAccumulator() { matches.reserve(4); }
+};
+
+struct HttpStreamState {
+  Stream* stream = nullptr;
+  ParseContext* ctx = nullptr;
+  bool limited = false;
+  size_t remaining = 0;
+};
+
+static bool matchesStopId(const std::string& rawId, const ParseContext& ctx) {
+  if (rawId.empty()) return false;
+  std::string cand = rawId;
+  trimStringInPlace(cand);
+  if (cand.empty()) return false;
+  std::string candLower = toLowerCopy(cand);
+  if (cand == ctx.stopCodeStd || candLower == ctx.stopCodeLower) return true;
+  if (!ctx.stopCodeShort.empty()) {
+    if (cand == ctx.stopCodeShort || candLower == ctx.stopCodeShortLower) return true;
+  }
+  size_t colon = cand.find(':');
+  if (colon != std::string::npos && colon + 1 < cand.size()) {
+    std::string tail = cand.substr(colon + 1);
+    trimStringInPlace(tail);
+    if (!tail.empty()) {
+      std::string tailLower = toLowerCopy(tail);
+      if (tail == ctx.stopCodeStd || tailLower == ctx.stopCodeLower) return true;
+      if (!ctx.stopCodeShort.empty() && (tail == ctx.stopCodeShort || tailLower == ctx.stopCodeShortLower)) return true;
+    }
+  }
+  return false;
+}
+
+static bool streamRead(pb_istream_t* stream, pb_byte_t* buf, size_t count) {
+  if (!stream || !stream->state) return false;
+  HttpStreamState* state = static_cast<HttpStreamState*>(stream->state);
+  if (!state || !state->stream) return false;
+  if (state->limited && count > state->remaining) {
+    stream->bytes_left = 0;
+    return false;
+  }
+  size_t total = 0;
+  while (total < count) {
+    size_t n = state->stream->readBytes(reinterpret_cast<char*>(buf) + total, count - total);
+    if (n == 0) {
+      if (state->limited) {
+        state->remaining = 0;
+        stream->bytes_left = 0;
+      }
+      return false;
+    }
+    total += n;
+    if (state->ctx) state->ctx->bytesRead += n;
+    if (state->limited && state->remaining >= n) state->remaining -= n;
+  }
+  return true;
+}
+
+static bool readStringToStd(pb_istream_t* stream, std::string& out) {
+  out.clear();
+  size_t remaining = stream->bytes_left;
+  if (remaining == 0) return true;
+  out.reserve(out.size() + remaining);
+  uint8_t buffer[64];
+  while (stream->bytes_left > 0) {
+    size_t take = stream->bytes_left;
+    if (take > sizeof(buffer)) take = sizeof(buffer);
+    if (!pb_read(stream, buffer, take)) return false;
+    out.append(reinterpret_cast<const char*>(buffer), take);
+  }
+  return true;
+}
+
+static bool decodeStopTimeEvent(pb_istream_t* stream, int64_t& outTime, bool& hasTime) {
+  outTime = 0;
+  hasTime = false;
+  int64_t scheduledTime = 0;
+  bool hasScheduled = false;
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    switch (tag) {
+      case 2: { // time
+        if (wireType != PB_WT_VARINT) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        uint64_t raw = 0;
+        if (!pb_decode_varint(stream, &raw)) return false;
+        outTime = static_cast<int64_t>(raw);
+        hasTime = true;
+        break;
+      }
+      case 4: { // scheduled_time (experimental)
+        if (wireType != PB_WT_VARINT) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        uint64_t raw = 0;
+        if (!pb_decode_varint(stream, &raw)) return false;
+        scheduledTime = static_cast<int64_t>(raw);
+        hasScheduled = true;
+        break;
+      }
+      default:
+        if (!pb_skip_field(stream, wireType)) return false;
+        break;
+    }
+  }
+  if (!eof) return false;
+  if (!hasTime && hasScheduled) {
+    outTime = scheduledTime;
+    hasTime = true;
+  }
+  return true;
+}
+
+static bool decodeStopTimeProperties(pb_istream_t* stream, std::string& assignedStopId) {
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    if (tag == 1 && wireType == PB_WT_STRING) {
+      pb_istream_t sub;
+      if (!pb_make_string_substream(stream, &sub)) return false;
+      bool ok = readStringToStd(&sub, assignedStopId);
+      pb_close_string_substream(stream, &sub);
+      if (!ok) return false;
+    } else {
+      if (!pb_skip_field(stream, wireType)) return false;
+    }
+  }
+  return eof;
+}
+
+static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, ParseContext& ctx) {
+  uint32_t stopSequence = 0;
+  bool hasStopSequence = false;
+  std::string stopId;
+  int64_t arrivalTime = 0;
+  bool hasArrival = false;
+  int64_t departureTime = 0;
+  bool hasDeparture = false;
+  int scheduleRelationship = 0; // SCHEDULED by default
+
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    switch (tag) {
+      case 1: { // stop_sequence
+        if (wireType != PB_WT_VARINT) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        uint64_t raw = 0;
+        if (!pb_decode_varint(stream, &raw)) return false;
+        stopSequence = static_cast<uint32_t>(raw);
+        hasStopSequence = true;
+        break;
+      }
+      case 4: { // stop_id
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = readStringToStd(&sub, stopId);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 2: { // arrival
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = decodeStopTimeEvent(&sub, arrivalTime, hasArrival);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 3: { // departure
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = decodeStopTimeEvent(&sub, departureTime, hasDeparture);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 5: { // schedule relationship
+        if (wireType != PB_WT_VARINT) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        uint64_t raw = 0;
+        if (!pb_decode_varint(stream, &raw)) return false;
+        scheduleRelationship = static_cast<int>(raw);
+        break;
+      }
+      case 6: { // StopTimeProperties (assigned_stop_id)
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        std::string assigned;
+        bool ok = decodeStopTimeProperties(&sub, assigned);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        if (stopId.empty() && !assigned.empty()) stopId = assigned;
+        break;
+      }
+      default:
+        if (!pb_skip_field(stream, wireType)) return false;
+        break;
+    }
+  }
+  if (!eof) return false;
+
+  ctx.stopUpdatesTotal++;
+
+  // Skip SKIPPED or NO_DATA updates.
+  if (scheduleRelationship == 1 || scheduleRelationship == 2) {
+    if (ctx.stopUpdatesTotal <= 5) {
+      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT stop skipped/no-data"));
+    }
+    return true;
+  }
+
+  int64_t chosen = 0;
+  if (hasDeparture) chosen = departureTime;
+  else if (hasArrival) chosen = arrivalTime;
+
+  if (chosen <= 0) {
+    if (ctx.stopUpdatesTotal <= 5) {
+      DEBUG_PRINTF("DepartStrip: GTFS-RT stop had no usable time (stopId='%s')\n", stopId.c_str());
+    }
+    return true;
+  }
+
+  if (stopId.empty()) {
+    if (ctx.stopUpdatesTotal <= 5) {
+      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT stop missing stop_id"));
+    }
+    // Without a stop_id we have no reliable match for a single-stop source.
+    return true;
+  }
+
+  bool stopMatched = matchesStopId(stopId, ctx);
+  if (!stopMatched) {
+    if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
+      DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored (want '%s')\n",
+                   stopId.c_str(),
+                   ctx.stopCodeStd.c_str());
+    }
+    return true;
+  }
+
+  TripAccumulator::PendingStop pending;
+  pending.epoch = chosen;
+  pending.hasSequence = hasStopSequence;
+  pending.stopSequence = stopSequence;
+  accum.matches.push_back(pending);
+  return true;
+}
+
+static bool decodeTripDescriptor(pb_istream_t* stream, TripAccumulator& accum) {
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    switch (tag) {
+      case 1: { // trip_id
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = readStringToStd(&sub, accum.trip.tripId);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 5: { // route_id
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = readStringToStd(&sub, accum.trip.routeId);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      default:
+        if (!pb_skip_field(stream, wireType)) return false;
+        break;
+    }
+  }
+  return eof;
+}
+
+static time_t clampToTimeT(int64_t value) {
+  if (value <= 0) return 0;
+  const int64_t maxT = static_cast<int64_t>(std::numeric_limits<time_t>::max());
+  if (value > maxT) return static_cast<time_t>(maxT);
+  return static_cast<time_t>(value);
+}
+
+static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
+  if (accum.matches.empty()) return 0;
+  String lineRef;
+  if (!accum.trip.routeId.empty()) lineRef = accum.trip.routeId.c_str();
+  else if (!accum.trip.tripId.empty()) lineRef = accum.trip.tripId.c_str();
+  if (lineRef.length() == 0) lineRef = F("?");
+
+  size_t added = 0;
+  for (const auto& pending : accum.matches) {
+    time_t dep = clampToTimeT(pending.epoch);
+    if (dep == 0) continue;
+    // Discard stale departures more than ~1 hour in the past.
+    if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
+    DepartModel::Entry::Item item;
+    item.estDep = dep;
+    item.lineRef = lineRef;
+    ctx.items.push_back(std::move(item));
+    ctx.stopUpdatesMatched++;
+    ++added;
+
+    if (ctx.logMatches < 6) {
+      char timeBuf[24];
+      departstrip::util::fmt_local(timeBuf, sizeof(timeBuf), item.estDep, "%H:%M:%S");
+      String seqStr = pending.hasSequence ? String(pending.stopSequence) : String(F("?"));
+      DEBUG_PRINTF("DepartStrip: GTFS-RT match #%u: line='%s' dep=%s seq=%s\n",
+                   (unsigned)(ctx.logMatches + 1),
+                   item.lineRef.c_str(),
+                   timeBuf,
+                   seqStr.c_str());
+      ctx.logMatches++;
+    }
+  }
+  return added;
+}
+
+static bool decodeTripUpdate(pb_istream_t* stream, ParseContext& ctx) {
+  TripAccumulator accum;
+  uint64_t tripTimestamp = 0;
+  ctx.tripUpdateCount++;
+
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    switch (tag) {
+      case 1: { // TripDescriptor
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = decodeTripDescriptor(&sub, accum);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 2: { // StopTimeUpdate
+        if (wireType != PB_WT_STRING) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        pb_istream_t sub;
+        if (!pb_make_string_substream(stream, &sub)) return false;
+        bool ok = decodeStopTimeUpdate(&sub, accum, ctx);
+        pb_close_string_substream(stream, &sub);
+        if (!ok) return false;
+        break;
+      }
+      case 4: { // timestamp
+        if (wireType != PB_WT_VARINT) {
+          if (!pb_skip_field(stream, wireType)) return false;
+          break;
+        }
+        uint64_t raw = 0;
+        if (!pb_decode_varint(stream, &raw)) return false;
+        if (raw > tripTimestamp) tripTimestamp = raw;
+        break;
+      }
+      default:
+        if (!pb_skip_field(stream, wireType)) return false;
+        break;
+    }
+  }
+  if (!eof) return false;
+
+  if (tripTimestamp > 0) {
+    time_t t = clampToTimeT(static_cast<int64_t>(tripTimestamp));
+    if (t > ctx.apiTimestamp) ctx.apiTimestamp = t;
+  }
+
+  size_t added = flushTripAccumulator(accum, ctx);
+  if (added > 0) {
+    ctx.tripUpdateMatched++;
+  } else if (ctx.tripUpdateCount <= 5 || (ctx.tripUpdateCount % 50 == 0)) {
+    const char* route = accum.trip.routeId.empty() ? "" : accum.trip.routeId.c_str();
+    const char* trip = accum.trip.tripId.empty() ? "" : accum.trip.tripId.c_str();
+    DEBUG_PRINTF("DepartStrip: GTFS-RT trip had no matching stops (route='%s' trip='%s')\n",
+                 route,
+                 trip);
+  }
+  return true;
+}
+
+static bool decodeFeedEntity(pb_istream_t* stream, ParseContext& ctx) {
+  ctx.feedEntityCount++;
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    if (tag == 3 && wireType == PB_WT_STRING) { // trip_update
+      pb_istream_t sub;
+      if (!pb_make_string_substream(stream, &sub)) return false;
+      bool ok = decodeTripUpdate(&sub, ctx);
+      pb_close_string_substream(stream, &sub);
+      if (!ok) return false;
+    } else {
+      if (!pb_skip_field(stream, wireType)) return false;
+    }
+  }
+  return eof;
+}
+
+static bool decodeFeedHeader(pb_istream_t* stream, ParseContext& ctx) {
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    if (tag == 3 && wireType == PB_WT_VARINT) { // timestamp
+      uint64_t raw = 0;
+      if (!pb_decode_varint(stream, &raw)) return false;
+      time_t t = clampToTimeT(static_cast<int64_t>(raw));
+      if (t > ctx.apiTimestamp) ctx.apiTimestamp = t;
+      if (raw > 0 && ctx.feedEntityCount == 0 && ctx.tripUpdateCount == 0) {
+        char tsBuf[24];
+        departstrip::util::fmt_local(tsBuf, sizeof(tsBuf), ctx.apiTimestamp, "%H:%M:%S");
+        DEBUG_PRINTF("DepartStrip: GTFS-RT header timestamp %s\n", tsBuf);
+      }
+    } else {
+      if (!pb_skip_field(stream, wireType)) return false;
+    }
+  }
+  return eof;
+}
+
+static bool decodeFeedMessage(pb_istream_t* stream, ParseContext& ctx) {
+  pb_wire_type_t wireType;
+  uint32_t tag;
+  bool eof = false;
+  bool sawHeader = false;
+  while (pb_decode_tag(stream, &wireType, &tag, &eof)) {
+    if (tag == 1 && wireType == PB_WT_STRING) {
+      pb_istream_t sub;
+      if (!pb_make_string_substream(stream, &sub)) return false;
+      bool ok = decodeFeedHeader(&sub, ctx);
+      pb_close_string_substream(stream, &sub);
+      if (!ok) return false;
+      sawHeader = true;
+    } else if (tag == 2 && wireType == PB_WT_STRING) {
+      pb_istream_t sub;
+      if (!pb_make_string_substream(stream, &sub)) return false;
+      bool ok = decodeFeedEntity(&sub, ctx);
+      pb_close_string_substream(stream, &sub);
+      if (!ok) return false;
+    } else {
+      if (!pb_skip_field(stream, wireType)) return false;
+    }
+  }
+  return eof && sawHeader;
+}
+
+static bool parseGtfsRtStream(Stream& body, size_t contentLength, ParseContext& ctx, const char** errOut) {
+  HttpStreamState state;
+  state.stream = &body;
+  state.ctx = &ctx;
+  if (contentLength > 0) {
+    state.limited = true;
+    state.remaining = contentLength;
+  }
+  pb_istream_t istream = {streamRead, &state, contentLength > 0 ? contentLength : PB_SIZE_MAX};
+#ifndef PB_NO_ERRMSG
+  istream.errmsg = nullptr;
+#endif
+  ctx.bytesRead = 0;
+  bool ok = decodeFeedMessage(&istream, ctx);
+  if (errOut) {
+#ifndef PB_NO_ERRMSG
+    *errOut = ok ? nullptr : istream.errmsg;
+#else
+    *errOut = ok ? nullptr : "decode error";
+#endif
+  }
+  return ok;
+}
+
+} // namespace
+
 GtfsRtSource::GtfsRtSource(const char* key) {
   if (key && *key) configKey_ = key;
 }
@@ -63,13 +656,75 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
                clen.c_str(),
                cenc.c_str(),
                tenc.c_str());
+  ParseContext ctx(agency_, stopCode_, now);
+  const char* decodeErr = nullptr;
+  bool parsed = false;
+
+  Stream& body = http_.getStream();
+  size_t streamLen = (contentLen > 0) ? (size_t)contentLen : 0;
+  parsed = parseGtfsRtStream(body, streamLen, ctx, &decodeErr);
 
   http_.end();
 
   nextFetch_ = now + updateSecs_;
   backoffMult_ = 1;
   lastBackoffLog_ = 0;
-  return nullptr;
+
+  if (!parsed) {
+    DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: protobuf decode failed (%s) bytes=%u feedEntities=%u tripUpdates=%u stopUpdates=%u\n",
+                 decodeErr ? decodeErr : "unknown error",
+                 (unsigned)ctx.bytesRead,
+                 (unsigned)ctx.feedEntityCount,
+                 (unsigned)ctx.tripUpdateCount,
+                 (unsigned)ctx.stopUpdatesTotal);
+    return nullptr;
+  }
+
+  if (ctx.items.empty()) {
+    DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: no departures parsed (feedEntities=%u tripUpdates=%u stopUpdates=%u matched=%u bytes=%u)\n",
+                 (unsigned)ctx.feedEntityCount,
+                 (unsigned)ctx.tripUpdateCount,
+                 (unsigned)ctx.stopUpdatesTotal,
+                 (unsigned)ctx.stopUpdatesMatched,
+                 (unsigned)ctx.bytesRead);
+    return nullptr;
+  }
+
+  std::sort(ctx.items.begin(), ctx.items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
+    if (a.estDep != b.estDep) return a.estDep < b.estDep;
+    return a.lineRef.compareTo(b.lineRef) < 0;
+  });
+  ctx.items.erase(std::unique(ctx.items.begin(), ctx.items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
+    return a.estDep == b.estDep && a.lineRef == b.lineRef;
+  }), ctx.items.end());
+
+  const size_t MAX_ITEMS = 24;
+  if (ctx.items.size() > MAX_ITEMS) ctx.items.resize(MAX_ITEMS);
+
+  DepartModel::Entry board;
+  board.key.reserve(agency_.length() + 1 + stopCode_.length());
+  board.key = agency_;
+  board.key += ':';
+  board.key += stopCode_;
+  board.batch.apiTs = ctx.apiTimestamp ? ctx.apiTimestamp : now;
+  if (board.batch.apiTs == 0) board.batch.apiTs = now;
+  board.batch.ourTs = now;
+  board.batch.items = std::move(ctx.items);
+
+  std::unique_ptr<DepartModel> model(new DepartModel());
+  model->boards.push_back(std::move(board));
+
+  const auto& items = model->boards.front().batch.items;
+  DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: parsed feedEntities=%u tripUpdates=%u matchedTrips=%u stopUpdates=%u matchedStopUpdates=%u bytes=%u items=%u\n",
+               (unsigned)ctx.feedEntityCount,
+               (unsigned)ctx.tripUpdateCount,
+               (unsigned)ctx.tripUpdateMatched,
+               (unsigned)ctx.stopUpdatesTotal,
+               (unsigned)ctx.stopUpdatesMatched,
+               (unsigned)ctx.bytesRead,
+               (unsigned)items.size());
+
+  return model;
 }
 
 void GtfsRtSource::reload(std::time_t now) {
@@ -158,6 +813,7 @@ String GtfsRtSource::composeUrl(const String& agency, const String& stopCode) co
 
 bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
   http_.setTimeout(10000);
+  client_.setTimeout(10000);
   if (!http_.begin(client_, url)) {
     http_.end();
     DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: begin() failed"));
