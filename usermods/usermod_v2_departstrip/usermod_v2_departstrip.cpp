@@ -189,25 +189,63 @@ void DepartStrip::appendConfigData(Print& s) {
 
   // Per-source Stop name and current-route swatches (anchor below Delete)
   for (auto& src : sources_) {
-    if (strcmp(src->sourceType(), "siri") != 0) continue;
-    SiriSource* ss = static_cast<SiriSource*>(src.get());
-    // Collect current lines seen for this stop from the model
-    const String& agency = ss->agency();
-    std::vector<String> lines;
-    if (model_) model_->currentLinesForBoard(ss->sourceKey(), lines);
+    const char* type = src->sourceType();
+    bool isSiri = (strcmp(type, "siri") == 0);
+    bool isGtfs = (strcmp(type, "gtfsrt") == 0);
+    if (!isSiri && !isGtfs) continue;
 
-    // Build HTML suffix placed AFTER the field (3rd arg)
+    std::vector<String> lines;
+    String agency;
+    if (model_) {
+      auto appendLines = [&](const String& key) {
+        std::vector<String> tmp;
+        model_->currentLinesForBoard(key, tmp);
+        for (const auto& ln : tmp) {
+          bool exists = false;
+          for (const auto& existing : lines) {
+            if (existing == ln) { exists = true; break; }
+          }
+          if (!exists) lines.push_back(ln);
+        }
+      };
+
+      if (isSiri) {
+        SiriSource* ss = static_cast<SiriSource*>(src.get());
+        agency = ss->agency();
+        appendLines(ss->sourceKey());
+      } else if (isGtfs) {
+        auto* gs = static_cast<GtfsRtSource*>(src.get());
+        agency = gs->agency();
+        const auto& stops = gs->stopCodes();
+        if (stops.empty()) {
+          appendLines(gs->sourceKey());
+        } else {
+          for (const auto& stop : stops) {
+            String key = gs->agency();
+            key += ':';
+            key += stop;
+            appendLines(key);
+          }
+        }
+      }
+    }
+
+    if (!isSiri && lines.empty()) continue;
+
     s.print(F("addInfo('DepartStrip:")); s.print(src->configKey()); s.print(F(":Delete',1,'"));
     s.print(F("<div style=\\'margin-top:8px;text-align:center;\\'>"));
-    // Stop label (optional)
-    if (ss->stopName().length()) {
-      String nm = ss->stopName();
-      // Escape for HTML and JS single-quoted string context
-      nm.replace("&","&amp;");
-      nm.replace("<","&lt;"); nm.replace(">","&gt;");
-      nm.replace("\\","\\\\"); nm.replace("'","\\'");
-      s.print(F("<div style=\\'margin-bottom:4px;\\'><b>Stop:</b> ")); s.print(nm); s.print(F("</div>"));
+
+    if (isSiri) {
+      SiriSource* ss = static_cast<SiriSource*>(src.get());
+      if (ss->stopName().length()) {
+        String nm = ss->stopName();
+        nm.replace("&","&amp;");
+        nm.replace("<","&lt;"); nm.replace(">","&gt;");
+        nm.replace("\\","\\\\"); nm.replace("'","\\'");
+        s.print(F("<div style=\\'margin-bottom:4px;\\'><b>Stop:</b> ")); s.print(nm); s.print(F("</div>"));
+      }
     }
+
     if (!lines.empty()) {
       s.print(F("<div style=\\'font-weight:600;margin-bottom:4px;\\'>Routes</div>"));
       s.print(F("<div style=\\'display:flex;flex-wrap:wrap;gap:8px;justify-content:center;\\'>"));
