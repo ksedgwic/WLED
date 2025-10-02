@@ -271,9 +271,9 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
         bool ok = readStringToStd(&sub, stopId);
         pb_close_string_substream(stream, &sub);
         if (!ok) return false;
-        if (ctx.stopUpdatesTotal < 5) {
-          DEBUG_PRINTF("DepartStrip: GTFS-RT raw stop_id='%s'\n", stopId.c_str());
-        }
+        // if (ctx.stopUpdatesTotal < 5) {
+        //   DEBUG_PRINTF("DepartStrip: GTFS-RT raw stop_id='%s'\n", stopId.c_str());
+        // }
         break;
       }
       case 2: { // arrival
@@ -379,25 +379,19 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
 
   bool stopMatched = matchesStopId(stopId, ctx);
   if (!stopMatched) {
-    if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
-      DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored (want '%s')\n",
-                   stopId.c_str(),
-                   ctx.stopCodeStd.c_str());
-    }
+    // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
+    //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored (want '%s')\n",
+    //                stopId.c_str(),
+    //                ctx.stopCodeStd.c_str());
+    // }
     return true;
   }
 
   if (ctx.stopUpdatesMatched < 5 || (ctx.stopUpdatesMatched % 200) == 0) {
-    if (hasStopSequence) {
-      DEBUG_PRINTF("DepartStrip: GTFS-RT stop matched '%s' (seq=%u) (totalMatches=%u)\n",
-                   stopId.c_str(),
-                   (unsigned)stopSequence,
-                   (unsigned)ctx.stopUpdatesMatched);
-    } else {
-      DEBUG_PRINTF("DepartStrip: GTFS-RT stop matched '%s' (seq=?) (totalMatches=%u)\n",
-                   stopId.c_str(),
-                   (unsigned)ctx.stopUpdatesMatched);
-    }
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT stop matched '%s' (seq=%s) (totalMatches=%u)\n",
+    //             stopId.c_str(),
+    //             hasStopSequence ? String(stopSequence).c_str() : "?",
+    //             (unsigned)ctx.stopUpdatesMatched);
   }
 
   TripAccumulator::PendingStop pending;
@@ -430,9 +424,9 @@ static bool decodeTripDescriptor(pb_istream_t* stream, TripAccumulator& accum, P
         bool ok = readStringToStd(&sub, accum.trip.tripId);
         pb_close_string_substream(stream, &sub);
         if (!ok) return false;
-        if (accum.trip.tripId.size() && ctx.tripUpdateCount <= 5) {
-          DEBUG_PRINTF("DepartStrip: GTFS-RT TripDescriptor trip_id='%s'\n", accum.trip.tripId.c_str());
-        }
+        //if (accum.trip.tripId.size() && ctx.tripUpdateCount <= 5) {
+        //  DEBUG_PRINTF("DepartStrip: GTFS-RT TripDescriptor trip_id='%s'\n", accum.trip.tripId.c_str());
+        //}
         break;
       }
       case 5: { // route_id
@@ -448,9 +442,9 @@ static bool decodeTripDescriptor(pb_istream_t* stream, TripAccumulator& accum, P
         bool ok = readStringToStd(&sub, accum.trip.routeId);
         pb_close_string_substream(stream, &sub);
         if (!ok) return false;
-        if (accum.trip.routeId.size() && ctx.tripUpdateCount <= 5) {
-          DEBUG_PRINTF("DepartStrip: GTFS-RT TripDescriptor route_id='%s'\n", accum.trip.routeId.c_str());
-        }
+        //if (accum.trip.routeId.size() && ctx.tripUpdateCount <= 5) {
+        //  DEBUG_PRINTF("DepartStrip: GTFS-RT TripDescriptor route_id='%s'\n", accum.trip.routeId.c_str());
+        //}
         break;
       }
       default:
@@ -474,10 +468,10 @@ static time_t clampToTimeT(int64_t value) {
 
 static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
   if (accum.matches.empty()) return 0;
-  DEBUG_PRINTF("DepartStrip: GTFS-RT flushing %u pending matches (route='%s' trip='%s')\n",
-               (unsigned)accum.matches.size(),
-               accum.trip.routeId.c_str(),
-               accum.trip.tripId.c_str());
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT flushing %u pending matches (route='%s' trip='%s')\n",
+  //             (unsigned)accum.matches.size(),
+  //             accum.trip.routeId.c_str(),
+  //             accum.trip.tripId.c_str());
   String lineRef;
   if (!accum.trip.routeId.empty()) lineRef = accum.trip.routeId.c_str();
   else if (!accum.trip.tripId.empty()) lineRef = accum.trip.tripId.c_str();
@@ -490,10 +484,10 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
     if (pending.epoch > (int64_t)LONG_MAX) epochLog = LONG_MAX;
     else if (pending.epoch < (int64_t)LONG_MIN) epochLog = LONG_MIN;
     else epochLog = (long)pending.epoch;
-    DEBUG_PRINTF("DepartStrip: GTFS-RT flush candidate epoch=%ld seq=%u hasSeq=%u\n",
-                 epochLog,
-                 (unsigned)pending.stopSequence,
-                 pending.hasSequence ? 1u : 0u);
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT flush candidate epoch=%ld seq=%u hasSeq=%u\n",
+    //             epochLog,
+    //             (unsigned)pending.stopSequence,
+    //             pending.hasSequence ? 1u : 0u);
     time_t dep = clampToTimeT(pending.epoch);
     if (dep == 0) continue;
     // Discard stale departures more than ~1 hour in the past.
@@ -502,40 +496,40 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
     item.estDep = dep;
     item.lineRef = lineRef;
     ctx.items.push_back(std::move(item));
-    DEBUG_PRINTF("DepartStrip: GTFS-RT push item success size=%u capacity=%u\n",
-                 (unsigned)ctx.items.size(),
-                 (unsigned)ctx.items.capacity());
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT push item success size=%u capacity=%u\n",
+    //             (unsigned)ctx.items.size(),
+    //             (unsigned)ctx.items.capacity());
     const DepartModel::Entry::Item& pushed = ctx.items.back();
     ctx.stopUpdatesMatched++;
     ++added;
-    DEBUG_PRINTF("DepartStrip: GTFS-RT after push stopMatches=%u added=%u\n",
-                 (unsigned)ctx.stopUpdatesMatched,
-                 (unsigned)added);
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT after push stopMatches=%u added=%u\n",
+    //             (unsigned)ctx.stopUpdatesMatched,
+    //             (unsigned)added);
 
     if (ctx.logMatches < 6) {
-      DEBUG_PRINTF("DepartStrip: GTFS-RT preparing match log estDep=%ld\n",
-                   (long)pushed.estDep);
-      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT calling fmt_local"));
+      //DEBUG_PRINTF("DepartStrip: GTFS-RT preparing match log estDep=%ld\n",
+      //             (long)pushed.estDep);
+      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT calling fmt_local"));
       char timeBuf[24];
       departstrip::util::fmt_local(timeBuf, sizeof(timeBuf), pushed.estDep, "%H:%M:%S");
-      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT fmt_local complete"));
+      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT fmt_local complete"));
       char seqBuf[12];
       if (pending.hasSequence) snprintf(seqBuf, sizeof(seqBuf), "%u", (unsigned)pending.stopSequence);
       else { seqBuf[0] = '?'; seqBuf[1] = '\0'; }
-      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT preparing final match log"));
-      DEBUG_PRINTF("DepartStrip: GTFS-RT match #%u: line='%s' dep=%s seq=%s (ctxItems=%u)\n",
-                   (unsigned)(ctx.logMatches + 1),
-                   pushed.lineRef.c_str(),
-                   timeBuf,
-                   seqBuf,
-                   (unsigned)ctx.items.size());
-      DEBUG_PRINTLN(F("DepartStrip: GTFS-RT match log complete"));
+      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT preparing final match log"));
+      //DEBUG_PRINTF("DepartStrip: GTFS-RT match #%u: line='%s' dep=%s seq=%s (ctxItems=%u)\n",
+      //             (unsigned)(ctx.logMatches + 1),
+      //             pushed.lineRef.c_str(),
+      //             timeBuf,
+      //             seqBuf,
+      //             (unsigned)ctx.items.size());
+      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT match log complete"));
       ctx.logMatches++;
     }
   }
-  DEBUG_PRINTF("DepartStrip: GTFS-RT flush added=%u totalItems=%u\n",
-               (unsigned)added,
-               (unsigned)ctx.items.size());
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT flush added=%u totalItems=%u\n",
+  //             (unsigned)added,
+  //             (unsigned)ctx.items.size());
   return added;
 }
 
@@ -543,9 +537,9 @@ static bool decodeTripUpdate(pb_istream_t* stream, ParseContext& ctx) {
   TripAccumulator accum;
   uint64_t tripTimestamp = 0;
   ctx.tripUpdateCount++;
-  DEBUG_PRINTF("DepartStrip: GTFS-RT decoding TripUpdate #%u (matched=%u)\n",
-               (unsigned)ctx.tripUpdateCount,
-               (unsigned)ctx.tripUpdateMatched);
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT decoding TripUpdate #%u (matched=%u)\n",
+  //             (unsigned)ctx.tripUpdateCount,
+  //             (unsigned)ctx.tripUpdateMatched);
 
   pb_wire_type_t wireType;
   uint32_t tag;
@@ -611,31 +605,31 @@ static bool decodeTripUpdate(pb_istream_t* stream, ParseContext& ctx) {
   size_t added = flushTripAccumulator(accum, ctx);
   if (added > 0) {
     ctx.tripUpdateMatched++;
-    DEBUG_PRINTF("DepartStrip: GTFS-RT trip matched route='%s' trip='%s' stopUpdates=%u matchedStops=%u added=%u\n",
-                 accum.trip.routeId.c_str(),
-                 accum.trip.tripId.c_str(),
-                 (unsigned)accum.totalStopUpdates,
-                 (unsigned)accum.matchedStopUpdates,
-                 (unsigned)added);
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT trip matched route='%s' trip='%s' stopUpdates=%u matchedStops=%u added=%u\n",
+    //             accum.trip.routeId.c_str(),
+    //             accum.trip.tripId.c_str(),
+    //             (unsigned)accum.totalStopUpdates,
+    //             (unsigned)accum.matchedStopUpdates,
+    //             (unsigned)added);
   } else if (ctx.tripUpdateCount <= 5 || (ctx.tripUpdateCount % 50 == 0)) {
-    const char* route = accum.trip.routeId.empty() ? "" : accum.trip.routeId.c_str();
-    const char* trip = accum.trip.tripId.empty() ? "" : accum.trip.tripId.c_str();
-    DEBUG_PRINTF("DepartStrip: GTFS-RT trip had no matching stops (route='%s' trip='%s' stopUpdates=%u)\n",
-                 route,
-                 trip,
-                 (unsigned)accum.totalStopUpdates);
+    //const char* route = accum.trip.routeId.empty() ? "" : accum.trip.routeId.c_str();
+    //const char* trip = accum.trip.tripId.empty() ? "" : accum.trip.tripId.c_str();
+    //DEBUG_PRINTF("DepartStrip: GTFS-RT trip had no matching stops (route='%s' trip='%s' stopUpdates=%u)\n",
+    //             route,
+    //             trip,
+    //             (unsigned)accum.totalStopUpdates);
   }
-  DEBUG_PRINTF("DepartStrip: GTFS-RT TripUpdate #%u finished added=%u matchedTrips=%u\n",
-               (unsigned)ctx.tripUpdateCount,
-               (unsigned)added,
-               (unsigned)ctx.tripUpdateMatched);
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT TripUpdate exit"));
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT TripUpdate #%u finished added=%u matchedTrips=%u\n",
+  //             (unsigned)ctx.tripUpdateCount,
+  //             (unsigned)added,
+  //             (unsigned)ctx.tripUpdateMatched);
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT TripUpdate exit"));
   return true;
 }
 
 static bool decodeFeedEntity(pb_istream_t* stream, ParseContext& ctx) {
   ctx.feedEntityCount++;
-  DEBUG_PRINTF("DepartStrip: GTFS-RT decoding FeedEntity #%u\n", (unsigned)ctx.feedEntityCount);
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT decoding FeedEntity #%u\n", (unsigned)ctx.feedEntityCount);
   pb_wire_type_t wireType;
   uint32_t tag;
   bool eof = false;
@@ -654,10 +648,10 @@ static bool decodeFeedEntity(pb_istream_t* stream, ParseContext& ctx) {
     DEBUG_PRINTLN(F("DepartStrip: GTFS-RT FeedEntity missing EOF"));
     return false;
   }
-  DEBUG_PRINTF("DepartStrip: GTFS-RT FeedEntity #%u done tripUpdates=%u matchedTrips=%u\n",
-               (unsigned)ctx.feedEntityCount,
-               (unsigned)ctx.tripUpdateCount,
-               (unsigned)ctx.tripUpdateMatched);
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT FeedEntity #%u done tripUpdates=%u matchedTrips=%u\n",
+  //             (unsigned)ctx.feedEntityCount,
+  //             (unsigned)ctx.tripUpdateCount,
+  //             (unsigned)ctx.tripUpdateMatched);
   return true;
 }
 
@@ -853,7 +847,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
     DEBUG_PRINTF("DepartStrip: GTFS-RT last matched stop sequence=%u\n", (unsigned)ctx.lastStopSeq);
   }
 
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT building board"));
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT building board"));
 
   if (ctx.items.empty()) {
     DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: no departures parsed (feedEntities=%u tripUpdates=%u stopUpdates=%u matched=%u bytes=%u)\n",
@@ -881,7 +875,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
     ctx.items.resize(MAX_ITEMS);
   }
 
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT constructing board entry"));
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT constructing board entry"));
   DepartModel::Entry board;
   board.key.reserve(agency_.length() + 1 + stopCode_.length());
   board.key = agency_;
@@ -891,13 +885,13 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
   if (board.batch.apiTs == 0) board.batch.apiTs = now;
   board.batch.ourTs = now;
   board.batch.items = std::move(ctx.items);
-  DEBUG_PRINTF("DepartStrip: GTFS-RT board constructed items=%u\n",
-               (unsigned)board.batch.items.size());
+  //DEBUG_PRINTF("DepartStrip: GTFS-RT board constructed items=%u\n",
+  //             (unsigned)board.batch.items.size());
 
   std::unique_ptr<DepartModel> model(new DepartModel());
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT pushing board to model"));
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT pushing board to model"));
   model->boards.push_back(std::move(board));
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT model updated"));
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT model updated"));
 
   const auto& items = model->boards.front().batch.items;
   DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: parsed feedEntities=%u tripUpdates=%u matchedTrips=%u stopUpdates=%u matchedStopUpdates=%u bytes=%u items=%u\n",
@@ -909,7 +903,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
                (unsigned)ctx.bytesRead,
                (unsigned)items.size());
 
-  DEBUG_PRINTLN(F("DepartStrip: GTFS-RT returning model"));
+  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT returning model"));
 
   return model;
 }
