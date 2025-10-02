@@ -4,6 +4,12 @@
 #include "depart_model.h"
 #include "util.h"
 #include "wled.h"
+#include <WiFiClient.h>
+#if defined(ARDUINO_ARCH_ESP8266)
+#include <ESP8266HTTPClient.h>
+#else
+#include <HTTPClient.h>
+#endif
 
 // Placeholder GTFS-RT source that currently only handles configuration.
 class GtfsRtSource : public IDataSourceT<DepartModel> {
@@ -15,7 +21,11 @@ private:
   String   agency_;
   String   stopCode_;
   time_t   nextFetch_ = 0;
+  uint8_t  backoffMult_ = 1;
+  time_t   lastBackoffLog_ = 0;
   std::string configKey_ = "gtfsrt_source";
+  WiFiClient client_;
+  HTTPClient http_;
 
 public:
   explicit GtfsRtSource(const char* key = "gtfsrt_source");
@@ -31,4 +41,8 @@ public:
   const char* configKey() const override { return configKey_.c_str(); }
 
   const String& agency() const { return agency_; }
+
+private:
+  String composeUrl(const String& agency, const String& stopCode) const;
+  bool httpBegin(const String& url, int& outLen, int& outStatus);
 };
