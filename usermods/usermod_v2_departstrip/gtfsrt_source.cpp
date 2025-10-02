@@ -34,12 +34,18 @@ static std::string toLowerCopy(const std::string& s) {
 }
 
 struct ParseContext {
+  struct StopContext {
+    String stopCode;                // e.g. "900202"
+    std::string fullStd;            // e.g. "BA:900202"
+    std::string fullLower;
+    std::string tailStd;            // e.g. "900202"
+    std::string tailLower;
+    std::vector<DepartModel::Entry::Item> items;
+    bool lastStopSeqValid = false;
+    uint32_t lastStopSeq = 0;
+  };
+
   String agency;
-  String stopCode;
-  std::string stopCodeStd;
-  std::string stopCodeLower;
-  std::string stopCodeShort;
-  std::string stopCodeShortLower;
   time_t now;
   time_t apiTimestamp = 0;
   size_t feedEntityCount = 0;
@@ -51,19 +57,45 @@ struct ParseContext {
   size_t logMatches = 0;
   uint32_t lastStopSeq = 0;
   bool lastStopSeqValid = false;
-  std::vector<DepartModel::Entry::Item> items;
+  std::vector<StopContext> stops;
 
-  ParseContext(const String& agencyIn, const String& stopIn, time_t nowIn)
-    : agency(agencyIn), stopCode(stopIn), stopCodeStd(stopIn.c_str()), now(nowIn) {
-    trimStringInPlace(stopCodeStd);
-    stopCodeLower = toLowerCopy(stopCodeStd);
-    size_t colon = stopCodeStd.find(':');
-    if (colon != std::string::npos && colon + 1 < stopCodeStd.size()) {
-      stopCodeShort = stopCodeStd.substr(colon + 1);
-      trimStringInPlace(stopCodeShort);
-      stopCodeShortLower = toLowerCopy(stopCodeShort);
+  ParseContext(const String& agencyIn, const std::vector<String>& stopCodesIn, time_t nowIn)
+      : agency(agencyIn), now(nowIn) {
+    stops.reserve(stopCodesIn.empty() ? 1 : stopCodesIn.size());
+    if (stopCodesIn.empty()) {
+      StopContext sc;
+      sc.stopCode = String();
+      sc.tailStd.clear();
+      sc.tailLower.clear();
+      if (agency.length() > 0) {
+        String full = agency + ':';
+        sc.fullStd = std::string(full.c_str());
+        sc.fullLower = toLowerCopy(sc.fullStd);
+      }
+      sc.items.reserve(16);
+      stops.push_back(std::move(sc));
+    } else {
+      for (const String& raw : stopCodesIn) {
+        String trimmed = raw;
+        trimmed.trim();
+        StopContext sc;
+        sc.stopCode = trimmed;
+        sc.tailStd = std::string(trimmed.c_str());
+        trimStringInPlace(sc.tailStd);
+        sc.tailLower = toLowerCopy(sc.tailStd);
+        if (agency.length() > 0 && sc.tailStd.length() > 0) {
+          String full = agency + ':' + trimmed;
+          sc.fullStd = std::string(full.c_str());
+          trimStringInPlace(sc.fullStd);
+          sc.fullLower = toLowerCopy(sc.fullStd);
+        } else {
+          sc.fullStd = sc.tailStd;
+          sc.fullLower = sc.tailLower;
+        }
+        sc.items.reserve(16);
+        stops.push_back(std::move(sc));
+      }
     }
-    items.reserve(16);
   }
 };
 
@@ -72,6 +104,7 @@ struct TripAccumulator {
     int64_t epoch = 0;
     bool hasSequence = false;
     uint32_t stopSequence = 0;
+    int stopIndex = -1;
   };
   struct TripInfo {
     std::string routeId;
@@ -92,27 +125,48 @@ struct HttpStreamState {
   bool shortRead = false;
 };
 
-static bool matchesStopId(const std::string& rawId, const ParseContext& ctx) {
-  if (rawId.empty()) return false;
+static int matchStopId(const std::string& rawId, const ParseContext& ctx) {
+  if (rawId.empty()) return -1;
   std::string cand = rawId;
   trimStringInPlace(cand);
-  if (cand.empty()) return false;
+  if (cand.empty()) return -1;
   std::string candLower = toLowerCopy(cand);
-  if (cand == ctx.stopCodeStd || candLower == ctx.stopCodeLower) return true;
-  if (!ctx.stopCodeShort.empty()) {
-    if (cand == ctx.stopCodeShort || candLower == ctx.stopCodeShortLower) return true;
-  }
+  std::string tail;
+  std::string tailLower;
   size_t colon = cand.find(':');
   if (colon != std::string::npos && colon + 1 < cand.size()) {
-    std::string tail = cand.substr(colon + 1);
+    tail = cand.substr(colon + 1);
     trimStringInPlace(tail);
-    if (!tail.empty()) {
-      std::string tailLower = toLowerCopy(tail);
-      if (tail == ctx.stopCodeStd || tailLower == ctx.stopCodeLower) return true;
-      if (!ctx.stopCodeShort.empty() && (tail == ctx.stopCodeShort || tailLower == ctx.stopCodeShortLower)) return true;
+    if (!tail.empty()) tailLower = toLowerCopy(tail);
+  }
+
+  for (size_t i = 0; i < ctx.stops.size(); ++i) {
+    const auto& stop = ctx.stops[i];
+    if (!stop.fullStd.empty() && (cand == stop.fullStd || candLower == stop.fullLower)) return (int)i;
+    if (!stop.tailStd.empty()) {
+      if (cand == stop.tailStd || candLower == stop.tailLower) return (int)i;
+      if (!tail.empty() && (tail == stop.tailStd || tailLower == stop.tailLower)) return (int)i;
     }
   }
-  return false;
+  return -1;
+}
+
+static void splitStopCodes(const String& input, std::vector<String>& out) {
+  out.clear();
+  String normalized = input;
+  normalized.replace(';', ',');
+  normalized.replace(' ', ',');
+  normalized.replace('\t', ',');
+  int start = 0;
+  int len = normalized.length();
+  while (start < len) {
+    int comma = normalized.indexOf(',', start);
+    String token = (comma >= 0) ? normalized.substring(start, comma) : normalized.substring(start);
+    token.trim();
+    if (token.length() > 0) out.push_back(token);
+    if (comma < 0) break;
+    start = comma + 1;
+  }
 }
 
 static bool streamRead(pb_istream_t* stream, pb_byte_t* buf, size_t count) {
@@ -373,35 +427,30 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
     if (ctx.stopUpdatesTotal <= 5) {
       DEBUG_PRINTLN(F("DepartStrip: GTFS-RT stop missing stop_id"));
     }
-    // Without a stop_id we have no reliable match for a single-stop source.
     return true;
   }
 
-  bool stopMatched = matchesStopId(stopId, ctx);
-  if (!stopMatched) {
+  int stopIndex = matchStopId(stopId, ctx);
+  if (stopIndex < 0) {
     // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
-    //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored (want '%s')\n",
-    //                stopId.c_str(),
-    //                ctx.stopCodeStd.c_str());
+    //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored\n", stopId.c_str());
     // }
     return true;
-  }
-
-  if (ctx.stopUpdatesMatched < 5 || (ctx.stopUpdatesMatched % 200) == 0) {
-    //DEBUG_PRINTF("DepartStrip: GTFS-RT stop matched '%s' (seq=%s) (totalMatches=%u)\n",
-    //             stopId.c_str(),
-    //             hasStopSequence ? String(stopSequence).c_str() : "?",
-    //             (unsigned)ctx.stopUpdatesMatched);
   }
 
   TripAccumulator::PendingStop pending;
   pending.epoch = chosen;
   pending.hasSequence = hasStopSequence;
   pending.stopSequence = stopSequence;
+  pending.stopIndex = stopIndex;
   accum.matches.push_back(pending);
   accum.matchedStopUpdates++;
   ctx.lastStopSeqValid = hasStopSequence;
   ctx.lastStopSeq = stopSequence;
+  if (hasStopSequence && stopIndex >= 0 && (size_t)stopIndex < ctx.stops.size()) {
+    ctx.stops[stopIndex].lastStopSeqValid = true;
+    ctx.stops[stopIndex].lastStopSeq = stopSequence;
+  }
   return true;
 }
 
@@ -480,56 +529,33 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
   size_t added = 0;
   for (const auto& pending : accum.matches) {
     if ((added & 0x3) == 0) yield();
-    long epochLog;
-    if (pending.epoch > (int64_t)LONG_MAX) epochLog = LONG_MAX;
-    else if (pending.epoch < (int64_t)LONG_MIN) epochLog = LONG_MIN;
-    else epochLog = (long)pending.epoch;
-    //DEBUG_PRINTF("DepartStrip: GTFS-RT flush candidate epoch=%ld seq=%u hasSeq=%u\n",
-    //             epochLog,
-    //             (unsigned)pending.stopSequence,
-    //             pending.hasSequence ? 1u : 0u);
+    if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
+    auto& stopCtx = ctx.stops[pending.stopIndex];
     time_t dep = clampToTimeT(pending.epoch);
     if (dep == 0) continue;
-    // Discard stale departures more than ~1 hour in the past.
     if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
     DepartModel::Entry::Item item;
     item.estDep = dep;
     item.lineRef = lineRef;
-    ctx.items.push_back(std::move(item));
-    //DEBUG_PRINTF("DepartStrip: GTFS-RT push item success size=%u capacity=%u\n",
-    //             (unsigned)ctx.items.size(),
-    //             (unsigned)ctx.items.capacity());
-    const DepartModel::Entry::Item& pushed = ctx.items.back();
+    stopCtx.items.push_back(std::move(item));
+    const DepartModel::Entry::Item& pushed = stopCtx.items.back();
     ctx.stopUpdatesMatched++;
     ++added;
-    //DEBUG_PRINTF("DepartStrip: GTFS-RT after push stopMatches=%u added=%u\n",
-    //             (unsigned)ctx.stopUpdatesMatched,
-    //             (unsigned)added);
-
     if (ctx.logMatches < 6) {
-      //DEBUG_PRINTF("DepartStrip: GTFS-RT preparing match log estDep=%ld\n",
-      //             (long)pushed.estDep);
-      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT calling fmt_local"));
       char timeBuf[24];
       departstrip::util::fmt_local(timeBuf, sizeof(timeBuf), pushed.estDep, "%H:%M:%S");
-      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT fmt_local complete"));
       char seqBuf[12];
       if (pending.hasSequence) snprintf(seqBuf, sizeof(seqBuf), "%u", (unsigned)pending.stopSequence);
       else { seqBuf[0] = '?'; seqBuf[1] = '\0'; }
-      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT preparing final match log"));
-      //DEBUG_PRINTF("DepartStrip: GTFS-RT match #%u: line='%s' dep=%s seq=%s (ctxItems=%u)\n",
+      //DEBUG_PRINTF("DepartStrip: GTFS-RT match #%u: line='%s' dep=%s seq=%s (stop=%s)\n",
       //             (unsigned)(ctx.logMatches + 1),
       //             pushed.lineRef.c_str(),
       //             timeBuf,
       //             seqBuf,
-      //             (unsigned)ctx.items.size());
-      //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT match log complete"));
+      //             stopCtx.stopCode.c_str());
       ctx.logMatches++;
     }
   }
-  //DEBUG_PRINTF("DepartStrip: GTFS-RT flush added=%u totalItems=%u\n",
-  //             (unsigned)added,
-  //             (unsigned)ctx.items.size());
   return added;
 }
 
@@ -772,7 +798,8 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
     return nullptr;
   }
 
-  String url = composeUrl(agency_, stopCode_);
+  String firstStop = stopCodes_.empty() ? String() : stopCodes_[0];
+  String url = composeUrl(agency_, firstStop);
   String redacted = url;
   auto redactParam = [&](const __FlashStringHelper* key) {
     String k(key);
@@ -812,7 +839,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
                clen.c_str(),
                cenc.c_str(),
                tenc.c_str());
-  ParseContext ctx(agency_, stopCode_, now);
+  ParseContext ctx(agency_, stopCodes_, now);
   const char* decodeErr = nullptr;
   bool parsed = false;
 
@@ -849,7 +876,40 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
 
   //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT building board"));
 
-  if (ctx.items.empty()) {
+  const size_t MAX_ITEMS = 24;
+  size_t totalItems = 0;
+
+  std::unique_ptr<DepartModel> model(new DepartModel());
+  model->boards.reserve(ctx.stops.size());
+
+  for (auto& stopCtx : ctx.stops) {
+    auto& items = stopCtx.items;
+    if (items.empty()) continue;
+    std::sort(items.begin(), items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
+      if (a.estDep != b.estDep) return a.estDep < b.estDep;
+      return a.lineRef.compareTo(b.lineRef) < 0;
+    });
+    items.erase(std::unique(items.begin(), items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
+      return a.estDep == b.estDep && a.lineRef == b.lineRef;
+    }), items.end());
+    if (items.size() > MAX_ITEMS) {
+      items.resize(MAX_ITEMS);
+    }
+
+    DepartModel::Entry board;
+    board.key.reserve(agency_.length() + 1 + stopCtx.stopCode.length());
+    board.key = agency_;
+    board.key += ':';
+    board.key += stopCtx.stopCode;
+    board.batch.apiTs = ctx.apiTimestamp ? ctx.apiTimestamp : now;
+    if (board.batch.apiTs == 0) board.batch.apiTs = now;
+    board.batch.ourTs = now;
+    board.batch.items = std::move(items);
+    totalItems += board.batch.items.size();
+    model->boards.push_back(std::move(board));
+  }
+
+  if (model->boards.empty()) {
     DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: no departures parsed (feedEntities=%u tripUpdates=%u stopUpdates=%u matched=%u bytes=%u)\n",
                  (unsigned)ctx.feedEntityCount,
                  (unsigned)ctx.tripUpdateCount,
@@ -859,51 +919,15 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
     return nullptr;
   }
 
-  std::sort(ctx.items.begin(), ctx.items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
-    if (a.estDep != b.estDep) return a.estDep < b.estDep;
-    return a.lineRef.compareTo(b.lineRef) < 0;
-  });
-  ctx.items.erase(std::unique(ctx.items.begin(), ctx.items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b) {
-    return a.estDep == b.estDep && a.lineRef == b.lineRef;
-  }), ctx.items.end());
-
-  const size_t MAX_ITEMS = 24;
-  if (ctx.items.size() > MAX_ITEMS) {
-    DEBUG_PRINTF("DepartStrip: GTFS-RT truncating items %u->%u\n",
-                 (unsigned)ctx.items.size(),
-                 (unsigned)MAX_ITEMS);
-    ctx.items.resize(MAX_ITEMS);
-  }
-
-  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT constructing board entry"));
-  DepartModel::Entry board;
-  board.key.reserve(agency_.length() + 1 + stopCode_.length());
-  board.key = agency_;
-  board.key += ':';
-  board.key += stopCode_;
-  board.batch.apiTs = ctx.apiTimestamp ? ctx.apiTimestamp : now;
-  if (board.batch.apiTs == 0) board.batch.apiTs = now;
-  board.batch.ourTs = now;
-  board.batch.items = std::move(ctx.items);
-  //DEBUG_PRINTF("DepartStrip: GTFS-RT board constructed items=%u\n",
-  //             (unsigned)board.batch.items.size());
-
-  std::unique_ptr<DepartModel> model(new DepartModel());
-  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT pushing board to model"));
-  model->boards.push_back(std::move(board));
-  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT model updated"));
-
-  const auto& items = model->boards.front().batch.items;
-  DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: parsed feedEntities=%u tripUpdates=%u matchedTrips=%u stopUpdates=%u matchedStopUpdates=%u bytes=%u items=%u\n",
+  DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: parsed feedEntities=%u tripUpdates=%u matchedTrips=%u stopUpdates=%u matchedStopUpdates=%u bytes=%u items=%u boards=%u\n",
                (unsigned)ctx.feedEntityCount,
                (unsigned)ctx.tripUpdateCount,
                (unsigned)ctx.tripUpdateMatched,
                (unsigned)ctx.stopUpdatesTotal,
                (unsigned)ctx.stopUpdatesMatched,
                (unsigned)ctx.bytesRead,
-               (unsigned)items.size());
-
-  //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT returning model"));
+               (unsigned)totalItems,
+               (unsigned)model->boards.size());
 
   return model;
 }
@@ -917,7 +941,7 @@ void GtfsRtSource::reload(std::time_t now) {
 String GtfsRtSource::sourceKey() const {
   String k(agency_);
   k += ':';
-  k += stopCode_;
+  if (!stopCodes_.empty()) k += stopCodes_.front();
   return k;
 }
 
@@ -928,10 +952,14 @@ void GtfsRtSource::addToConfig(JsonObject& root) {
   root["TemplateUrl"] = baseUrl_;
   root["ApiKey"] = apiKey_;
   String key;
-  key.reserve(agency_.length() + 1 + stopCode_.length());
   key = agency_;
   key += ':';
-  key += stopCode_;
+  if (!stopCodes_.empty()) {
+    for (size_t i = 0; i < stopCodes_.size(); ++i) {
+      if (i > 0) key += ',';
+      key += stopCodes_[i];
+    }
+  }
   root["AgencyStopCode"] = key;
 }
 
@@ -939,7 +967,7 @@ bool GtfsRtSource::readFromConfig(JsonObject& root, bool startup_complete, bool&
   bool ok = true;
   bool prevEnabled = enabled_;
   String prevAgency = agency_;
-  String prevStop = stopCode_;
+  std::vector<String> prevStops = stopCodes_;
   String prevBase = baseUrl_;
 
   ok &= getJsonValue(root["Enabled"], enabled_, enabled_);
@@ -948,28 +976,67 @@ bool GtfsRtSource::readFromConfig(JsonObject& root, bool startup_complete, bool&
   ok &= getJsonValue(root["ApiKey"], apiKey_, apiKey_);
 
   String keyStr;
+  std::vector<String> newStops = prevStops;
   bool haveKey = getJsonValue(root["AgencyStopCode"], keyStr, (const char*)nullptr);
   if (!haveKey) haveKey = getJsonValue(root["Key"], keyStr, (const char*)nullptr);
   if (haveKey && keyStr.length() > 0) {
     int colon = keyStr.indexOf(':');
     if (colon > 0) {
       agency_ = keyStr.substring(0, colon);
-      stopCode_ = keyStr.substring(colon + 1);
+      String list = keyStr.substring(colon + 1);
+      newStops.clear();
+      splitStopCodes(list, newStops);
     }
   } else {
     ok &= getJsonValue(root["Agency"], agency_, agency_);
-    ok &= getJsonValue(root["StopCode"], stopCode_, stopCode_);
+    String stopField;
+    if (getJsonValue(root["StopCode"], stopField, (const char*)nullptr)) {
+      newStops.clear();
+      splitStopCodes(stopField, newStops);
+    }
+  }
+
+  stopCodes_ = std::move(newStops);
+  for (auto& sc : stopCodes_) {
+    sc.trim();
+    int colonPos = sc.lastIndexOf(':');
+    if (colonPos >= 0) sc = sc.substring(colonPos + 1);
+    sc.trim();
+  }
+  if (stopCodes_.size() > 1) {
+    std::vector<String> unique;
+    unique.reserve(stopCodes_.size());
+    for (const auto& sc : stopCodes_) {
+      bool exists = false;
+      for (const auto& us : unique) {
+        if (us.equalsIgnoreCase(sc)) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) unique.push_back(sc);
+    }
+    stopCodes_.swap(unique);
   }
 
   if (updateSecs_ < 10) updateSecs_ = 10;
 
-  invalidate_history |= (agency_ != prevAgency) || (stopCode_ != prevStop) || (baseUrl_ != prevBase);
+  auto stopsEqual = [](const std::vector<String>& a, const std::vector<String>& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  };
+
+  invalidate_history |= (agency_ != prevAgency) || !stopsEqual(prevStops, stopCodes_) || (baseUrl_ != prevBase);
 
   {
     String label = F("GtfsRtSource_");
     label += agency_;
     label += '_';
-    label += stopCode_;
+    if (!stopCodes_.empty()) label += stopCodes_.front();
+    else label += '*';
     configKey_ = std::string(label.c_str());
   }
 
