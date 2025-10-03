@@ -442,8 +442,24 @@ bool DepartStrip::readFromConfig(JsonObject& root) {
   }
 
   // Read remaining sources and views
-  for (auto& src : sources_) {
+  for (size_t i = 0; i < sources_.size(); ++i) {
+    auto& src = sources_[i];
     JsonObject sub = top[src->configKey()];
+    String currentType(src->sourceType());
+    String desiredType = currentType;
+    if (!sub.isNull()) desiredType = normalizeSourceType(sub["Type"] | currentType);
+    if (!desiredType.equalsIgnoreCase(currentType)) {
+      String cfgKey(src->configKey());
+      auto replacement = makeSourceForType(desiredType, cfgKey.c_str());
+      if (replacement) {
+        bool replInvalidated = false;
+        ok &= replacement->readFromConfig(sub, startup_complete, replInvalidated);
+        invalidate_history = true; // force reload after type change
+        if (replInvalidated) invalidate_history = true;
+        src = std::move(replacement);
+        continue;
+      }
+    }
     ok &= src->readFromConfig(sub, startup_complete, invalidate_history);
   }
   for (auto& vw : views_) {
