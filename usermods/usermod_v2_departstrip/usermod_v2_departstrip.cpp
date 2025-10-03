@@ -187,11 +187,31 @@ void DepartStrip::appendConfigData(Print& s) {
   for (auto& src : sources_) src->appendConfigData(s);
   for (auto& vw : views_) vw->appendConfigData(s, model_.get());
 
+  struct RenameTarget { String key; String label; };
+  std::vector<RenameTarget> renameTargets; renameTargets.reserve(sources_.size());
+
   // Per-source Stop name and current-route swatches (anchor below Delete)
   for (auto& src : sources_) {
     const char* type = src->sourceType();
     bool isSiri = (strcmp(type, "siri") == 0);
     bool isGtfs = (strcmp(type, "gtfsrt") == 0);
+    if (isSiri) {
+      String friendly = F("SIRI Source ");
+      String key = src->sourceKey();
+      if (key.length() == 0) {
+        SiriSource* ss = static_cast<SiriSource*>(src.get());
+        if (ss) key = ss->agency();
+      }
+      friendly += key;
+      friendly.trim();
+      if (friendly.length() > 0) renameTargets.push_back(RenameTarget{String(src->configKey()), friendly});
+    } else if (isGtfs) {
+      auto* gs = static_cast<GtfsRtSource*>(src.get());
+      String friendly = F("GTFS-RT Source ");
+      if (gs) friendly += gs->agency();
+      friendly.trim();
+      if (friendly.length() > 0) renameTargets.push_back(RenameTarget{String(src->configKey()), friendly});
+    }
     if (!isSiri && !isGtfs) continue;
 
     std::vector<String> lines;
@@ -270,6 +290,31 @@ void DepartStrip::appendConfigData(Print& s) {
   s.print(F("for(var i=0;i<inputs.length;i++){var fld=inputs[i]; if(!fld||fld.dataset.typeSel==='1') continue; var ft=(fld.type||'').toLowerCase(); if(ft&&ft!=='text') continue; var parent=fld.parentNode; if(!parent) continue; var sel=document.createElement('select'); sel.name=fld.name; sel.id=fld.id; sel.className=fld.className||''; var opts=[['siri','SIRI'],['gtfsrt','GTFS-RT']];"));
   s.print(F("for(var j=0;j<opts.length;j++){var opt=document.createElement('option'); opt.value=opts[j][0]; opt.textContent=opts[j][1]; sel.appendChild(opt);}"));
   s.print(F("var val=(fld.value||'').toLowerCase(); if(val!=='gtfsrt' && val!=='siri') val='siri'; sel.value=val; fld.dataset.typeSel='1'; parent.insertBefore(sel,fld); parent.removeChild(fld);} },0);"));
+
+  if (!renameTargets.empty()) {
+    s.print(F("setTimeout(function(){function dsRename(key,label){var nameEn='DepartStrip:'+key+':Enabled';"));
+    s.print(F("var sel=document.querySelector(`input[name=\"${nameEn}\"]`);"));
+    s.print(F("if(!sel){var nameType='DepartStrip:'+key+':Type'; sel=document.querySelector(`input[name=\"${nameType}\"]`);}"));
+    s.print(F("if(!sel) return; var ref=sel.previousElementSibling;"));
+    s.print(F("while(ref&&ref.tagName!=='P'){ref=ref.previousElementSibling;}"));
+    s.print(F("if(!ref) return; var u=ref.querySelector('u'); if(u) u.textContent=label;}"));
+    for (const auto& entry : renameTargets) {
+      String keyEsc(entry.key);
+      keyEsc.replace("\\", "\\\\");
+      keyEsc.replace("'", "\\'");
+      String labelEsc(entry.label);
+      labelEsc.replace("\\", "\\\\");
+      labelEsc.replace("'", "\\'");
+      labelEsc.replace("\r", " ");
+      labelEsc.replace("\n", " ");
+      s.print(F("dsRename('"));
+      s.print(keyEsc);
+      s.print(F("','"));
+      s.print(labelEsc);
+      s.print(F("');"));
+    }
+    s.print(F("},0);"));
+  }
 }
 
 bool DepartStrip::readFromConfig(JsonObject& root) {
