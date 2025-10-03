@@ -5,6 +5,9 @@
 #include "util.h"
 #include "wled.h"
 #include <WiFiClient.h>
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+#include <WiFiClientSecure.h>
+#endif
 #include <vector>
 #if defined(ARDUINO_ARCH_ESP8266)
 #include <ESP8266HTTPClient.h>
@@ -26,6 +29,9 @@ private:
   time_t   lastBackoffLog_ = 0;
   std::string configKey_ = "gtfsrt_source";
   WiFiClient client_;
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+  WiFiClientSecure clientSecure_;
+#endif
   HTTPClient http_;
 
 public:
