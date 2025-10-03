@@ -264,7 +264,12 @@ void DepartStrip::appendConfigData(Print& s) {
     }
     s.print(F("</div>"));
     s.println(F("','');"));
+
   }
+  s.print(F("setTimeout(function(){var inputs=document.querySelectorAll('input[name^=\"DepartStrip:\"][name$=\":Type\"]');"));
+  s.print(F("for(var i=0;i<inputs.length;i++){var fld=inputs[i]; if(!fld||fld.dataset.typeSel==='1') continue; var ft=(fld.type||'').toLowerCase(); if(ft&&ft!=='text') continue; var parent=fld.parentNode; if(!parent) continue; var sel=document.createElement('select'); sel.name=fld.name; sel.id=fld.id; sel.className=fld.className||''; var opts=[['siri','SIRI'],['gtfsrt','GTFS-RT']];"));
+  s.print(F("for(var j=0;j<opts.length;j++){var opt=document.createElement('option'); opt.value=opts[j][0]; opt.textContent=opts[j][1]; sel.appendChild(opt);}"));
+  s.print(F("var val=(fld.value||'').toLowerCase(); if(val!=='gtfsrt' && val!=='siri') val='siri'; sel.value=val; fld.dataset.typeSel='1'; parent.insertBefore(sel,fld); parent.removeChild(fld);} },0);"));
 }
 
 bool DepartStrip::readFromConfig(JsonObject& root) {

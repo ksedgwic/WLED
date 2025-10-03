@@ -941,7 +941,12 @@ void GtfsRtSource::reload(std::time_t now) {
 String GtfsRtSource::sourceKey() const {
   String k(agency_);
   k += ':';
-  if (!stopCodes_.empty()) k += stopCodes_.front();
+  if (!stopCodes_.empty()) {
+    for (size_t i = 0; i < stopCodes_.size(); ++i) {
+      if (i > 0) k += ',';
+      k += stopCodes_[i];
+    }
+  }
   return k;
 }
 
