@@ -831,6 +831,10 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
   String clen = http_.header("Content-Length");
   String cenc = http_.header("Content-Encoding");
   String tenc = http_.header("Transfer-Encoding");
+  String rateRemain = http_.header("RateLimit-Remaining");
+  if (rateRemain.length() > 0) {
+    DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: RateLimit-Remaining=%s\n", rateRemain.c_str());
+  }
 
   DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: status=%d type='%s' lenHint=%d contentLengthHdr=%s encoding='%s' transfer='%s'\n",
                httpStatus,
@@ -1077,8 +1081,8 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
   http_.setReuse(false);
   http_.addHeader("Connection", "close");
   http_.addHeader("Accept", "application/octet-stream", true, true);
-  static const char* hdrs[] = {"Content-Type", "Content-Length", "Content-Encoding", "Transfer-Encoding"};
-  http_.collectHeaders(hdrs, 4);
+  static const char* hdrs[] = {"Content-Type", "Content-Length", "Content-Encoding", "Transfer-Encoding", "RateLimit-Remaining"};
+  http_.collectHeaders(hdrs, 5);
 
   int status = http_.GET();
   if (status < 200 || status >= 300) {
