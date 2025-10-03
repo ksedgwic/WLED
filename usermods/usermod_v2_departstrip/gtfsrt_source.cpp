@@ -1070,8 +1070,21 @@ String GtfsRtSource::composeUrl(const String& agency, const String& stopCode) co
 
 bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
   http_.setTimeout(10000);
+
+  bool isHttps = url.startsWith(F("https://")) || url.startsWith(F("HTTPS://"));
+  WiFiClient* client = &client_;
   client_.setTimeout(10000);
-  if (!http_.begin(client_, url)) {
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+  if (isHttps) {
+    clientSecure_.setTimeout(10000);
+    clientSecure_.setInsecure();
+    client = &clientSecure_;
+  }
+#else
+  (void)isHttps;
+#endif
+
+  if (!http_.begin(*client, url)) {
     http_.end();
     DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: begin() failed"));
     return false;
