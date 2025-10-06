@@ -346,6 +346,7 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
         String fallback = jsonFirstString(mvj["PublishedLineName"]);
         if (fallback.length()) item.lineRef = fallback;
       }
+      item.lineRef = departstrip::util::formatLineLabel(agency_, item.lineRef);
       batch.items.push_back(std::move(item));
     } else if (hasTime && parsedTime < 3) {
       const char* dbg = expectedStr ? expectedStr : aimedStr;

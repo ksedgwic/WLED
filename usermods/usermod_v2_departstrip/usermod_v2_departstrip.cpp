@@ -189,6 +189,25 @@ void DepartStrip::appendConfigData(Print& s) {
 
   struct RenameTarget { String key; String label; };
   std::vector<RenameTarget> renameTargets; renameTargets.reserve(sources_.size());
+  std::vector<RenameTarget> cmapLabels; cmapLabels.reserve(DepartModel::colorMap().size());
+  {
+    const auto& cmapEntries = DepartModel::colorMap();
+    for (const auto& ce : cmapEntries) {
+      String agency; String line;
+      int colon = ce.key.indexOf(':');
+      if (colon > 0) {
+        agency = ce.key.substring(0, colon);
+        line = ce.key.substring(colon+1);
+      } else {
+        agency = ce.key;
+        line = String();
+      }
+      String friendly = departstrip::util::formatLineLabel(agency, line);
+      friendly.trim();
+      if (friendly.length() == 0) friendly = line.length() ? line : agency;
+      cmapLabels.push_back(RenameTarget{ce.key, friendly});
+    }
+  }
 
   // Per-source Stop name and current-route swatches (anchor below Delete)
   for (auto& src : sources_) {
@@ -308,6 +327,33 @@ void DepartStrip::appendConfigData(Print& s) {
       labelEsc.replace("\r", " ");
       labelEsc.replace("\n", " ");
       s.print(F("dsRename('"));
+      s.print(keyEsc);
+      s.print(F("','"));
+      s.print(labelEsc);
+      s.print(F("');"));
+    }
+    s.print(F("},0);"));
+  }
+  if (!cmapLabels.empty()) {
+    s.print(F("setTimeout(function(){function dsColorLabel(key,label){var sel=document.querySelector(\"input[name='DepartStrip:ColorMap:\"+key+\"']\");"));
+    s.print(F("if(!sel) return; var node=sel.previousSibling;"));
+    s.print(F("while(node && node.nodeType===3 && node.textContent.trim()==='') node=node.previousSibling;"));
+    s.print(F("if(node && node.nodeType===1 && (node.tagName||'').toUpperCase()==='INPUT' && ((node.type||'').toLowerCase()==='hidden')) node=node.previousSibling;"));
+    s.print(F("while(node && node.nodeType===3 && node.textContent.trim()==='') node=node.previousSibling;"));
+    s.print(F("if(node && node.nodeType===1 && (node.tagName||'').toUpperCase()==='INPUT' && ((node.type||'').toLowerCase()==='hidden')) node=node.previousSibling;"));
+    s.print(F("if(node && node.nodeType===3){node.textContent=' '+label+' ';return;}"));
+    s.print(F("if(node && node.nodeType===1){ node.textContent=label; return;}"));
+    s.print(F("var text=document.createTextNode(' '+label+' '); if(sel.parentNode) sel.parentNode.insertBefore(text, sel);}"));
+    for (const auto& entry : cmapLabels) {
+      String keyEsc(entry.key);
+      keyEsc.replace("\\", "\\\\");
+      keyEsc.replace("'", "\\'");
+      String labelEsc(entry.label);
+      labelEsc.replace("\\", "\\\\");
+      labelEsc.replace("'", "\\'");
+      labelEsc.replace("\\r", " ");
+      labelEsc.replace("\\n", " ");
+      s.print(F("dsColorLabel('"));
       s.print(keyEsc);
       s.print(F("','"));
       s.print(labelEsc);
