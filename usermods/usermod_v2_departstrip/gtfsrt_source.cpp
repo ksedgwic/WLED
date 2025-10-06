@@ -536,7 +536,7 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
     if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
     DepartModel::Entry::Item item;
     item.estDep = dep;
-    item.lineRef = lineRef;
+    item.lineRef = departstrip::util::formatLineLabel(ctx.agency, lineRef);
     stopCtx.items.push_back(std::move(item));
     const DepartModel::Entry::Item& pushed = stopCtx.items.back();
     ctx.stopUpdatesMatched++;
