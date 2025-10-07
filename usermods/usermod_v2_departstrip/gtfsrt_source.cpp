@@ -7,6 +7,7 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <map>
 #include <utility>
 #include <cstdio>
 #include <climits>
@@ -33,16 +34,218 @@ static std::string toLowerCopy(const std::string& s) {
   return out;
 }
 
+static bool isControlChar(unsigned char c) {
+  return c < 0x20 || c == 0x7F;
+}
+
+static void stripControlChars(std::string& s) {
+  size_t begin = 0;
+  while (begin < s.size() && isControlChar(static_cast<unsigned char>(s[begin]))) ++begin;
+  size_t end = s.size();
+  while (end > begin && isControlChar(static_cast<unsigned char>(s[end - 1]))) --end;
+  if (begin == 0 && end == s.size()) return;
+  s = s.substr(begin, end - begin);
+}
+
+static String canonicalBoardStop(const String& agency, const String& rawStop) {
+  String token = rawStop;
+  token.trim();
+  if (token.length() == 0) return String();
+
+  String tokenAgency = agency;
+  String stopPart = token;
+  int colon = stopPart.indexOf(':');
+  if (colon >= 0) {
+    tokenAgency = stopPart.substring(0, colon);
+    stopPart = stopPart.substring(colon + 1);
+  }
+  tokenAgency.trim();
+  stopPart.trim();
+
+  String filterSection;
+  int bracketStart = stopPart.indexOf('[');
+  if (bracketStart >= 0) {
+    int bracketEnd = stopPart.lastIndexOf(']');
+    if (bracketEnd > bracketStart) {
+      filterSection = stopPart.substring(bracketStart + 1, bracketEnd);
+      stopPart = stopPart.substring(0, bracketStart);
+      stopPart.trim();
+    }
+  }
+
+  String boardStop = stopPart;
+  if (filterSection.length() > 0) {
+    int startIdx = 0;
+    while (startIdx < filterSection.length()) {
+      int commaIdx = filterSection.indexOf(',', startIdx);
+      String filterToken = (commaIdx >= 0) ? filterSection.substring(startIdx, commaIdx) : filterSection.substring(startIdx);
+      filterToken.trim();
+      if (filterToken.length() > 0) {
+        int eqIdx = filterToken.indexOf('=');
+        if (eqIdx > 0) {
+          String key = filterToken.substring(0, eqIdx);
+          String value = filterToken.substring(eqIdx + 1);
+          key.trim();
+          value.trim();
+          if (key.length() > 0 && value.length() > 0) {
+            String keyLower = key;
+            keyLower.toLowerCase();
+            if (keyLower == "seq" || keyLower == "stop_sequence" || keyLower == "stopsequence") {
+              keyLower = "seq";
+            }
+            boardStop += '-';
+            boardStop += keyLower;
+            boardStop += '=';
+            boardStop += value;
+          }
+        }
+      }
+      if (commaIdx < 0) break;
+      startIdx = commaIdx + 1;
+    }
+  }
+  return boardStop;
+}
+
 struct ParseContext {
+  struct FilterEvalContext {
+    bool hasStopSequence = false;
+    int stopSequence = 0;
+    const std::map<int, std::map<int, std::string>>* extValues = nullptr;
+    const std::string* candidateStopId = nullptr;
+    const ParseContext* ctx = nullptr;
+    bool missingData = false;
+
+    FilterEvalContext(bool hasSeq,
+                      int seq,
+                      const std::map<int, std::map<int, std::string>>& ext,
+                      const std::string* stopId,
+                      const ParseContext* ctxIn)
+        : hasStopSequence(hasSeq),
+          stopSequence(seq),
+          extValues(&ext),
+          candidateStopId(stopId),
+          ctx(ctxIn),
+          missingData(false) {}
+  };
+
+  struct Filter {
+    virtual ~Filter() = default;
+    virtual bool evaluate(FilterEvalContext& state) const = 0;
+  };
+
+  struct SeqFilter : Filter {
+    explicit SeqFilter(int seq) : sequence(seq) {}
+
+    bool evaluate(FilterEvalContext& state) const override {
+      if (!state.hasStopSequence) {
+        state.missingData = true;
+        if (state.ctx && state.candidateStopId) {
+          DEBUG_PRINTF("DepartStrip: GTFS-RT filter seq expected=%d actual=<missing> match=no stop='%s'\n",
+                       sequence,
+                       state.candidateStopId->c_str());
+        }
+        return false;
+      }
+      bool matched = (state.stopSequence == sequence);
+      // if (state.ctx && state.candidateStopId) {
+      //   DEBUG_PRINTF("DepartStrip: GTFS-RT filter seq expected=%d actual=%d match=%s stop='%s'\n",
+      //                sequence,
+      //                state.stopSequence,
+      //                matched ? "yes" : "no",
+      //                state.candidateStopId->c_str());
+      // }
+      return matched;
+    }
+
+    int sequence = -1;
+  };
+
+  struct ExtFilter : Filter {
+    ExtFilter(int id, int tag, std::string value)
+        : extId(id), fieldTag(tag), valueLower(std::move(value)) {}
+
+    bool evaluate(FilterEvalContext& state) const override {
+      const char* stopIdStr = (state.candidateStopId) ? state.candidateStopId->c_str() : "<unknown>";
+      if (!state.extValues) {
+        state.missingData = true;
+        DEBUG_PRINTF("DepartStrip: GTFS-RT filter ext%d.%d expected='%s' actual=<missing> match=no stop='%s'\n",
+                     extId,
+                     fieldTag,
+                     valueLower.c_str(),
+                     stopIdStr);
+        return false;
+      }
+      const auto& exts = *state.extValues;
+      auto extIt = exts.find(extId);
+      if (extIt == exts.end()) {
+        state.missingData = true;
+        DEBUG_PRINTF("DepartStrip: GTFS-RT filter ext%d.%d expected='%s' actual=<missing> match=no stop='%s'\n",
+                     extId,
+                     fieldTag,
+                     valueLower.c_str(),
+                     stopIdStr);
+        return false;
+      }
+      auto fieldIt = extIt->second.find(fieldTag);
+      if (fieldIt == extIt->second.end()) {
+        state.missingData = true;
+        DEBUG_PRINTF("DepartStrip: GTFS-RT filter ext%d.%d expected='%s' actual=<missing> match=no stop='%s'\n",
+                     extId,
+                     fieldTag,
+                     valueLower.c_str(),
+                     stopIdStr);
+        return false;
+      }
+      const std::string& actual = fieldIt->second;
+      bool matched = (actual == valueLower);
+      // DEBUG_PRINTF("DepartStrip: GTFS-RT filter ext%d.%d expected='%s'(len=%u) actual='%s'(len=%u) match=%s stop='%s'\n",
+      //              extId,
+      //              fieldTag,
+      //              valueLower.c_str(),
+      //              static_cast<unsigned>(valueLower.size()),
+      //              actual.c_str(),
+      //              static_cast<unsigned>(actual.size()),
+      //              matched ? "yes" : "no",
+      //              stopIdStr);
+      if (!matched) {
+        size_t diffLen = (actual.size() < valueLower.size()) ? actual.size() : valueLower.size();
+        for (size_t idx = 0; idx < diffLen; ++idx) {
+          if (actual[idx] != valueLower[idx]) {
+            // DEBUG_PRINTF("DepartStrip: GTFS-RT filter ext%d.%d diff idx=%u expected=0x%02X actual=0x%02X\n",
+            //              extId,
+            //              fieldTag,
+            //              static_cast<unsigned>(idx),
+            //              static_cast<unsigned>(static_cast<unsigned char>(valueLower[idx])),
+            //              static_cast<unsigned>(static_cast<unsigned char>(actual[idx])));
+            break;
+          }
+        }
+      }
+      return matched;
+    }
+
+    int extId = 0;
+    int fieldTag = 1;
+    std::string valueLower;
+  };
+
   struct StopContext {
-    String stopCode;                // e.g. "900202"
+    String stopCode;                // e.g. "900202" or "900202-ext1005=1"
     std::string fullStd;            // e.g. "BA:900202"
     std::string fullLower;
     std::string tailStd;            // e.g. "900202"
     std::string tailLower;
+    std::vector<std::unique_ptr<Filter>> filters;
     std::vector<DepartModel::Entry::Item> items;
     bool lastStopSeqValid = false;
     uint32_t lastStopSeq = 0;
+
+    StopContext() = default;
+    StopContext(StopContext&&) = default;
+    StopContext& operator=(StopContext&&) = default;
+    StopContext(const StopContext&) = delete;
+    StopContext& operator=(const StopContext&) = delete;
   };
 
   String agency;
@@ -58,6 +261,7 @@ struct ParseContext {
   uint32_t lastStopSeq = 0;
   bool lastStopSeqValid = false;
   std::vector<StopContext> stops;
+  std::vector<int> extIdsNeeded;
 
   ParseContext(const String& agencyIn, const std::vector<String>& stopCodesIn, time_t nowIn)
       : agency(agencyIn), now(nowIn) {
@@ -76,29 +280,147 @@ struct ParseContext {
       stops.push_back(std::move(sc));
     } else {
       for (const String& raw : stopCodesIn) {
-        String trimmed = raw;
-        trimmed.trim();
-        StopContext sc;
-        sc.stopCode = trimmed;
-        sc.tailStd = std::string(trimmed.c_str());
-        trimStringInPlace(sc.tailStd);
-        sc.tailLower = toLowerCopy(sc.tailStd);
-        if (agency.length() > 0 && sc.tailStd.length() > 0) {
-          String full = agency + ':' + trimmed;
-          sc.fullStd = std::string(full.c_str());
-          trimStringInPlace(sc.fullStd);
-          sc.fullLower = toLowerCopy(sc.fullStd);
-        } else {
-          sc.fullStd = sc.tailStd;
-          sc.fullLower = sc.tailLower;
+        String token = raw;
+        token.trim();
+        if (token.length() == 0) continue;
+
+        String tokenAgency = agency;
+        String stopPart = token;
+        int colon = stopPart.indexOf(':');
+        if (colon >= 0) {
+          tokenAgency = stopPart.substring(0, colon);
+          stopPart = stopPart.substring(colon + 1);
         }
+        tokenAgency.trim();
+        stopPart.trim();
+
+        String filterSection;
+        int bracketStart = stopPart.indexOf('[');
+        if (bracketStart >= 0) {
+          int bracketEnd = stopPart.lastIndexOf(']');
+          if (bracketEnd > bracketStart) {
+            filterSection = stopPart.substring(bracketStart + 1, bracketEnd);
+            stopPart = stopPart.substring(0, bracketStart);
+            stopPart.trim();
+          }
+        }
+
+        std::vector<std::pair<String, String>> boardFilters;
+        std::vector<std::unique_ptr<Filter>> filters;
+
+        auto addBoardFilter = [&](const String& key, const String& value) {
+          boardFilters.emplace_back(key, value);
+        };
+
+        if (filterSection.length() > 0) {
+          int startIdx = 0;
+          while (startIdx < filterSection.length()) {
+            int commaIdx = filterSection.indexOf(',', startIdx);
+            String filterToken = (commaIdx >= 0) ? filterSection.substring(startIdx, commaIdx) : filterSection.substring(startIdx);
+            filterToken.trim();
+            if (filterToken.length() > 0) {
+              int eqIdx = filterToken.indexOf('=');
+              if (eqIdx > 0) {
+                String key = filterToken.substring(0, eqIdx);
+                String value = filterToken.substring(eqIdx + 1);
+                key.trim();
+                value.trim();
+                if (key.length() > 0 && value.length() > 0) {
+                  String keyLower = key;
+                  keyLower.toLowerCase();
+                  if (keyLower == "seq" || keyLower == "stop_sequence" || keyLower == "stopsequence") {
+                    int seqValue = value.toInt();
+                    filters.push_back(::make_unique<SeqFilter>(seqValue));
+                    addBoardFilter("seq", value);
+                  } else if (keyLower.startsWith("ext")) {
+                    addBoardFilter(keyLower, value);
+                    int dotPos = keyLower.indexOf('.');
+                    String extDigits = (dotPos >= 0) ? keyLower.substring(3, dotPos) : keyLower.substring(3);
+                    extDigits.trim();
+                    bool extDigitsValid = extDigits.length() > 0;
+                    for (unsigned i = 0; extDigitsValid && i < extDigits.length(); ++i) {
+                      if (!std::isdigit(static_cast<unsigned char>(extDigits.charAt(i)))) extDigitsValid = false;
+                    }
+                    int extId = extDigitsValid ? extDigits.toInt() : 0;
+                    int fieldTag = 1;
+                    if (dotPos >= 0) {
+                      String fieldStr = keyLower.substring(dotPos + 1);
+                      fieldStr.trim();
+                      bool fieldValid = fieldStr.length() > 0;
+                      for (unsigned i = 0; fieldValid && i < fieldStr.length(); ++i) {
+                        if (!std::isdigit(static_cast<unsigned char>(fieldStr.charAt(i)))) fieldValid = false;
+                      }
+                      fieldTag = fieldValid ? fieldStr.toInt() : 0;
+                    }
+                    if (extId > 0 && fieldTag > 0) {
+                      String valLower = value;
+                      valLower.trim();
+                      valLower.toLowerCase();
+                      std::string filterVal = std::string(valLower.c_str());
+                      stripControlChars(filterVal);
+                      filters.push_back(::make_unique<ExtFilter>(extId,
+                                                                fieldTag,
+                                                                std::move(filterVal)));
+                      bool have = false;
+                      for (int existing : extIdsNeeded) if (existing == extId) { have = true; break; }
+                      if (!have) extIdsNeeded.push_back(extId);
+                    }
+                  } else {
+                    addBoardFilter(keyLower, value);
+                  }
+                }
+              }
+            }
+            if (commaIdx < 0) break;
+            startIdx = commaIdx + 1;
+          }
+        }
+
+        StopContext sc;
+        sc.filters = std::move(filters);
+
+        String boardStop = stopPart;
+        for (const auto& kv : boardFilters) {
+          boardStop += '-';
+          boardStop += kv.first;
+          boardStop += '=';
+          boardStop += kv.second;
+        }
+        sc.stopCode = boardStop;
+
+        std::string tail = std::string(stopPart.c_str());
+        trimStringInPlace(tail);
+        sc.tailStd = tail;
+        sc.tailLower = toLowerCopy(sc.tailStd);
+
+        String fullStr;
+        if (tokenAgency.length() > 0) {
+          fullStr = tokenAgency;
+          fullStr += ':';
+          fullStr += stopPart;
+        } else if (agency.length() > 0) {
+          fullStr = agency;
+          fullStr += ':';
+          fullStr += stopPart;
+        } else {
+          fullStr = stopPart;
+        }
+        std::string full = std::string(fullStr.c_str());
+        trimStringInPlace(full);
+        sc.fullStd = full;
+        sc.fullLower = toLowerCopy(sc.fullStd);
+
         sc.items.reserve(16);
         stops.push_back(std::move(sc));
       }
     }
   }
-};
 
+  bool needsExt(int extId) const {
+    for (int existing : extIdsNeeded) if (existing == extId) return true;
+    return false;
+  }
+};
 struct TripAccumulator {
   struct PendingStop {
     int64_t epoch = 0;
@@ -125,7 +447,10 @@ struct HttpStreamState {
   bool shortRead = false;
 };
 
-static int matchStopId(const std::string& rawId, const ParseContext& ctx) {
+static int matchStopId(const std::string& rawId, const ParseContext& ctx,
+                           const std::map<int, std::map<int, std::string>>& extValues,
+                           int stopSequence, bool stopSequencePresent, bool& baseMatched) {
+  baseMatched = false;
   if (rawId.empty()) return -1;
   std::string cand = rawId;
   trimStringInPlace(cand);
@@ -140,14 +465,44 @@ static int matchStopId(const std::string& rawId, const ParseContext& ctx) {
     if (!tail.empty()) tailLower = toLowerCopy(tail);
   }
 
+  int fallbackMissingData = -1;
+
   for (size_t i = 0; i < ctx.stops.size(); ++i) {
     const auto& stop = ctx.stops[i];
-    if (!stop.fullStd.empty() && (cand == stop.fullStd || candLower == stop.fullLower)) return (int)i;
-    if (!stop.tailStd.empty()) {
-      if (cand == stop.tailStd || candLower == stop.tailLower) return (int)i;
-      if (!tail.empty() && (tail == stop.tailStd || tailLower == stop.tailLower)) return (int)i;
+    bool baseMatch = false;
+    if (!stop.fullStd.empty() && (cand == stop.fullStd || candLower == stop.fullLower)) {
+      baseMatch = true;
+    } else if (!stop.tailStd.empty()) {
+      if (cand == stop.tailStd || candLower == stop.tailLower) baseMatch = true;
+      else if (!tail.empty() && (tail == stop.tailStd || tailLower == stop.tailLower)) baseMatch = true;
     }
+    if (!baseMatch) continue;
+    baseMatched = true;
+
+    bool missingData = false;
+    bool passes = true;
+
+    if (passes && !stop.filters.empty()) {
+      for (const auto& filter : stop.filters) {
+        ParseContext::FilterEvalContext eval(stopSequencePresent,
+                                             stopSequence,
+                                             extValues,
+                                             &cand,
+                                             &ctx);
+        bool accepted = filter->evaluate(eval);
+        if (!accepted) {
+          if (eval.missingData) missingData = true;
+          passes = false;
+          break;
+        }
+      }
+    }
+
+    if (passes) return static_cast<int>(i);
+    if (!passes && missingData && fallbackMissingData < 0) fallbackMissingData = static_cast<int>(i);
   }
+
+  if (fallbackMissingData >= 0) return fallbackMissingData;
   return -1;
 }
 
@@ -218,7 +573,11 @@ static bool readStringToStd(pb_istream_t* stream, std::string& out) {
   return true;
 }
 
-static bool decodeStopTimeEvent(pb_istream_t* stream, int64_t& outTime, bool& hasTime) {
+static bool decodeStopTimeEvent(pb_istream_t* stream,
+                               int64_t& outTime,
+                               bool& hasTime,
+                               ParseContext& ctx,
+                               std::map<int, std::map<int, std::string>>& extValues) {
   outTime = 0;
   hasTime = false;
   int64_t scheduledTime = 0;
@@ -252,9 +611,36 @@ static bool decodeStopTimeEvent(pb_istream_t* stream, int64_t& outTime, bool& ha
         hasScheduled = true;
         break;
       }
-      default:
-        if (!pb_skip_field(stream, wireType)) return false;
+      default: {
+        if (tag >= 1000 && ctx.needsExt(tag) && wireType == PB_WT_STRING) {
+          pb_istream_t sub;
+          if (!pb_make_string_substream(stream, &sub)) {
+            DEBUG_PRINTLN(F("DepartStrip: GTFS-RT failed to open extension substream"));
+            return false;
+          }
+          std::map<int, std::string>& fields = extValues[tag];
+          while (sub.bytes_left > 0) {
+            pb_wire_type_t subType;
+            uint32_t subTag;
+            bool subEof = false;
+            if (!pb_decode_tag(&sub, &subType, &subTag, &subEof)) break;
+            if (subType == PB_WT_STRING) {
+              std::string value;
+              if (!readStringToStd(&sub, value)) { pb_close_string_substream(stream, &sub); return false; }
+              trimStringInPlace(value);
+              stripControlChars(value);
+              std::string lower = toLowerCopy(value);
+              fields[subTag] = lower;
+            } else {
+              if (!pb_skip_field(&sub, subType)) { pb_close_string_substream(stream, &sub); return false; }
+            }
+          }
+          pb_close_string_substream(stream, &sub);
+        } else {
+          if (!pb_skip_field(stream, wireType)) return false;
+        }
         break;
+      }
     }
   }
   if (!eof) {
@@ -295,6 +681,7 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
   int64_t departureTime = 0;
   bool hasDeparture = false;
   int scheduleRelationship = 0; // SCHEDULED by default
+  std::map<int, std::map<int, std::string>> extValues;
 
   pb_wire_type_t wireType;
   uint32_t tag;
@@ -340,7 +727,7 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
           DEBUG_PRINTLN(F("DepartStrip: GTFS-RT failed to open arrival substream"));
           return false;
         }
-        bool ok = decodeStopTimeEvent(&sub, arrivalTime, hasArrival);
+        bool ok = decodeStopTimeEvent(&sub, arrivalTime, hasArrival, ctx, extValues);
         pb_close_string_substream(stream, &sub);
         if (!ok) return false;
         if (!hasArrival) DEBUG_PRINTLN(F("DepartStrip: GTFS-RT arrival missing time"));
@@ -356,7 +743,7 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
           DEBUG_PRINTLN(F("DepartStrip: GTFS-RT failed to open departure substream"));
           return false;
         }
-        bool ok = decodeStopTimeEvent(&sub, departureTime, hasDeparture);
+        bool ok = decodeStopTimeEvent(&sub, departureTime, hasDeparture, ctx, extValues);
         pb_close_string_substream(stream, &sub);
         if (!ok) return false;
         if (!hasDeparture) DEBUG_PRINTLN(F("DepartStrip: GTFS-RT departure missing time"));
@@ -389,9 +776,36 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
         if (stopId.empty() && !assigned.empty()) stopId = assigned;
         break;
       }
-      default:
-        if (!pb_skip_field(stream, wireType)) return false;
+      default: {
+        if (tag >= 1000 && ctx.needsExt(tag) && wireType == PB_WT_STRING) {
+          pb_istream_t sub;
+          if (!pb_make_string_substream(stream, &sub)) {
+            DEBUG_PRINTLN(F("DepartStrip: GTFS-RT stop update failed to open extension substream"));
+            return false;
+          }
+          std::map<int, std::string>& fields = extValues[tag];
+          while (sub.bytes_left > 0) {
+            pb_wire_type_t subType;
+            uint32_t subTag;
+            bool subEof = false;
+            if (!pb_decode_tag(&sub, &subType, &subTag, &subEof)) break;
+            if (subType == PB_WT_STRING) {
+              std::string value;
+              if (!readStringToStd(&sub, value)) { pb_close_string_substream(stream, &sub); return false; }
+              trimStringInPlace(value);
+              stripControlChars(value);
+              std::string lower = toLowerCopy(value);
+              fields[subTag] = lower;
+            } else {
+              if (!pb_skip_field(&sub, subType)) { pb_close_string_substream(stream, &sub); return false; }
+            }
+          }
+          pb_close_string_substream(stream, &sub);
+        } else {
+          if (!pb_skip_field(stream, wireType)) return false;
+        }
         break;
+      }
     }
   }
   if (!eof) {
@@ -430,11 +844,17 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
     return true;
   }
 
-  int stopIndex = matchStopId(stopId, ctx);
+  bool baseMatched = false;
+  int stopIndex = matchStopId(stopId,
+                              ctx,
+                              extValues,
+                              hasStopSequence ? static_cast<int>(stopSequence) : 0,
+                              hasStopSequence,
+                              baseMatched);
   if (stopIndex < 0) {
-    // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
-    //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored\n", stopId.c_str());
-    // }
+    if (baseMatched && (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0)) {
+      DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' rejected by filters\n", stopId.c_str());
+    }
     return true;
   }
 
@@ -952,6 +1372,14 @@ String GtfsRtSource::sourceKey() const {
     }
   }
   return k;
+}
+
+String GtfsRtSource::boardKeyForStop(const String& stop) const {
+  String boardStop = canonicalBoardStop(agency_, stop);
+  String key(agency_);
+  key += ':';
+  if (boardStop.length() > 0) key += boardStop;
+  return key;
 }
 
 void GtfsRtSource::addToConfig(JsonObject& root) {

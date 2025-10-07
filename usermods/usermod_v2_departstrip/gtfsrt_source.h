@@ -49,6 +49,7 @@ public:
 
   const String& agency() const { return agency_; }
   const std::vector<String>& stopCodes() const { return stopCodes_; }
+  String boardKeyForStop(const String& stop) const;
 
 private:
   String composeUrl(const String& agency, const String& stopCode) const;

@@ -260,10 +260,7 @@ void DepartStrip::appendConfigData(Print& s) {
           appendLines(gs->sourceKey());
         } else {
           for (const auto& stop : stops) {
-            String key = gs->agency();
-            key += ':';
-            key += stop;
-            appendLines(key);
+            appendLines(gs->boardKeyForStop(stop));
           }
         }
       }
