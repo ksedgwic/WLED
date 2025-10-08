@@ -84,6 +84,11 @@ SiriSource::SiriSource(const char* key, const char* defAgency, const char* defSt
   if (defBaseUrl) baseUrl_ = defBaseUrl;
 }
 
+SiriSource::~SiriSource() {
+  delete jsonDoc_;
+  jsonDoc_ = nullptr;
+}
+
 void SiriSource::reload(std::time_t now) {
   nextFetch_ = now;
   backoffMult_ = 1;
@@ -262,6 +267,23 @@ size_t SiriSource::computeJsonCapacity(int contentLen) {
   return 20000; // 20 kB
 }
 
+DynamicJsonDocument& SiriSource::ensureJsonDoc(size_t capacity) {
+  if (capacity < 1024) capacity = 1024;
+  if (!jsonDoc_ || jsonCapacity_ < capacity) {
+    // Keep allocations quantized by reusing computeJsonCapacity's rounded input.
+    delete jsonDoc_;
+    jsonDoc_ = new DynamicJsonDocument(capacity);
+    jsonCapacity_ = capacity;
+  }
+  if (jsonDoc_) {
+    jsonDoc_->clear();
+    return *jsonDoc_;
+  }
+  static DynamicJsonDocument fallback(1024);
+  fallback.clear();
+  return fallback;
+}
+
 JsonObject SiriSource::getSiriRoot(DynamicJsonDocument& doc, bool& usedTopLevelFallback) {
   usedTopLevelFallback = false;
   JsonObject siri = doc["Siri"].as<JsonObject>();
@@ -425,7 +447,7 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
 
   size_t jsonSz = computeJsonCapacity(len);
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: json capacity=%u, free heap=%u\n", (unsigned)jsonSz, ESP.getFreeHeap());
-  DynamicJsonDocument doc(jsonSz);
+  DynamicJsonDocument& doc = ensureJsonDoc(jsonSz);
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: filter=on (len=%d)\n", len);
   if (!parseJsonFromHttp(doc)) {
     long delay = (long)updateSecs_ * (long)backoffMult_;
@@ -459,6 +481,7 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   // Model summary logging handled in DepartModel::update()
   nextFetch_ = now + updateSecs_;
   backoffMult_ = 1;
+  doc.clear();
   return model;
 }
 
