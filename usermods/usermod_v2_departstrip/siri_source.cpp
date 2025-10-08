@@ -77,14 +77,9 @@ static String jsonFirstString(JsonVariantConst v) {
 }
 
 // Shared JSON buffer reused across all Siri sources to limit heap fragmentation.
-static constexpr size_t SIRI_JSON_PRIMARY_CAP = 20000;
-static constexpr size_t SIRI_JSON_SECONDARY_CAP = 12288;
-static StaticJsonDocument<SIRI_JSON_PRIMARY_CAP> g_siriPrimaryDoc;
-static bool g_siriPrimaryInUse = false;
-static StaticJsonDocument<SIRI_JSON_SECONDARY_CAP> g_siriSecondaryDoc;
-static bool g_siriSecondaryInUse = false;
-static DynamicJsonDocument* g_siriDynamicDoc = nullptr;
-static size_t g_siriDynamicCapacity = 0;
+static constexpr size_t SIRI_JSON_MAX_CAP = 20000;
+static DynamicJsonDocument* g_siriSharedDoc = nullptr;
+static bool g_siriSharedInUse = false;
 } // namespace
 
 SiriSource::SiriSource(const char* key, const char* defAgency, const char* defStopCode, const char* defBaseUrl) {
@@ -275,35 +270,33 @@ size_t SiriSource::computeJsonCapacity(int contentLen) {
 JsonDocument* SiriSource::acquireJsonDoc(size_t capacity, bool& fromPool) {
   if (capacity < 1024) capacity = 1024;
   fromPool = false;
-  if (capacity <= SIRI_JSON_PRIMARY_CAP && !g_siriPrimaryInUse) {
-    g_siriPrimaryDoc.clear();
-    g_siriPrimaryInUse = true;
+  if (!g_siriSharedDoc) {
+    g_siriSharedDoc = new DynamicJsonDocument(SIRI_JSON_MAX_CAP);
+  }
+  if (!g_siriSharedInUse) {
+    if (g_siriSharedDoc->capacity() < SIRI_JSON_MAX_CAP) {
+      delete g_siriSharedDoc;
+      g_siriSharedDoc = new DynamicJsonDocument(SIRI_JSON_MAX_CAP);
+    }
+    g_siriSharedDoc->clear();
+    g_siriSharedInUse = true;
     fromPool = true;
-    return &g_siriPrimaryDoc;
+    return g_siriSharedDoc;
   }
-  if (capacity <= SIRI_JSON_SECONDARY_CAP && !g_siriSecondaryInUse) {
-    g_siriSecondaryDoc.clear();
-    g_siriSecondaryInUse = true;
-    return &g_siriSecondaryDoc;
-  }
-  if (capacity > SIRI_JSON_PRIMARY_CAP) capacity = SIRI_JSON_PRIMARY_CAP;
-  if (!g_siriDynamicDoc || g_siriDynamicCapacity < capacity) {
-    delete g_siriDynamicDoc;
-    g_siriDynamicDoc = new DynamicJsonDocument(capacity);
-    g_siriDynamicCapacity = capacity;
-  }
-  g_siriDynamicDoc->clear();
-  return g_siriDynamicDoc;
+  // Fallback allocation; caller is responsible for deleting via releaseJsonDoc.
+  DynamicJsonDocument* temp = new DynamicJsonDocument(capacity);
+  temp->clear();
+  return temp;
 }
 
-void SiriSource::releaseJsonDoc(JsonDocument* doc, bool /*fromPool*/) {
+void SiriSource::releaseJsonDoc(JsonDocument* doc, bool fromPool) {
   if (!doc) return;
-  if (doc == &g_siriPrimaryDoc) {
-    g_siriPrimaryInUse = false;
-  } else if (doc == &g_siriSecondaryDoc) {
-    g_siriSecondaryInUse = false;
+  if (doc == g_siriSharedDoc) {
+    g_siriSharedInUse = false;
+    doc->clear();
+    return;
   }
-  doc->clear();
+  if (!fromPool) delete static_cast<DynamicJsonDocument*>(doc);
 }
 
 JsonObject SiriSource::getSiriRoot(JsonDocument& doc, bool& usedTopLevelFallback) {
