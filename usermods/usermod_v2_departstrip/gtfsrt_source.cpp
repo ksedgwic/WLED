@@ -184,25 +184,21 @@ struct TripAccumulator {
     bool hasSequence = false;
     uint32_t stopSequence = 0;
     int stopIndex = -1;
-    size_t observedIndex = SIZE_MAX;
-  };
-  struct ObservedStop {
-    std::string stopId;
-    bool hasSequence = false;
-    uint32_t stopSequence = 0;
+    bool needsDestination = false;
+    bool destinationSatisfied = false;
   };
   struct TripInfo {
     std::string routeId;
     std::string tripId;
   } trip;
   std::vector<PendingStop> matches;
-  std::vector<ObservedStop> observedStops;
+  std::vector<std::vector<size_t>> pendingAwaitingDestination;
   size_t totalStopUpdates = 0;
   size_t matchedStopUpdates = 0;
 
   TripAccumulator() {
     matches.reserve(4);
-    observedStops.reserve(16);
+    pendingAwaitingDestination.reserve(4);
   }
 };
 
@@ -226,35 +222,22 @@ static void findMatchingStopIndexes(const std::string& rawId,
   }
 }
 
-static bool destinationSatisfied(const TripAccumulator& accum,
-                                 const ParseContext& ctx,
-                                 const TripAccumulator::PendingStop& pending) {
-  if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) return false;
-  const auto& stopCtx = ctx.stops[pending.stopIndex];
-  if (!stopCtx.hasDestination) return true;
-  if (pending.observedIndex == SIZE_MAX || pending.observedIndex >= accum.observedStops.size()) return false;
-  if (stopCtx.destination.empty()) return true;
-
-  const auto& observedStops = accum.observedStops;
-  auto matchesAtIndex = [&](size_t idx) -> bool {
-    if (idx >= observedStops.size()) return false;
-    const auto& obs = observedStops[idx];
-    if (obs.stopId.empty()) return false;
-    CandidateStopId cand;
-    if (!buildCandidateStopId(obs.stopId, cand)) return false;
-    return candidateMatches(cand, stopCtx.destination);
-  };
-
-  if (matchesAtIndex(pending.observedIndex)) return true;
-
-  uint32_t baseSeq = pending.stopSequence;
-  bool enforceSeq = pending.hasSequence;
-  for (size_t i = pending.observedIndex + 1; i < observedStops.size(); ++i) {
-    const auto& obs = observedStops[i];
-    if (enforceSeq && obs.hasSequence && obs.stopSequence <= baseSeq) continue;
-    if (matchesAtIndex(i)) return true;
+static void findDestinationIndexes(const std::string& rawId,
+                                   const ParseContext& ctx,
+                                   std::vector<int>& out) {
+  out.clear();
+  CandidateStopId cand;
+  if (!buildCandidateStopId(rawId, cand)) return;
+  for (size_t i = 0; i < ctx.stops.size(); ++i) {
+    const auto& stop = ctx.stops[i];
+    if (!stop.hasDestination || stop.destination.empty()) continue;
+    if (candidateMatches(cand, stop.destination)) out.push_back(static_cast<int>(i));
   }
-  return false;
+}
+
+static bool destinationSatisfied(const TripAccumulator::PendingStop& pending) {
+  if (!pending.needsDestination) return true;
+  return pending.destinationSatisfied;
 }
 
 static void splitStopCodes(const String& input, std::vector<String>& out) {
@@ -537,12 +520,9 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
   }
 
   trimStringInPlace(stopId);
-  TripAccumulator::ObservedStop observed;
-  observed.stopId = stopId;
-  observed.hasSequence = hasStopSequence;
-  observed.stopSequence = stopSequence;
-  accum.observedStops.push_back(std::move(observed));
-  size_t observedIndex = accum.observedStops.size() - 1;
+  if (accum.pendingAwaitingDestination.size() < ctx.stops.size()) {
+    accum.pendingAwaitingDestination.resize(ctx.stops.size());
+  }
 
   std::vector<int> matchingIndexes;
   matchingIndexes.reserve(4);
@@ -561,12 +541,33 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
     pending.hasSequence = hasStopSequence;
     pending.stopSequence = stopSequence;
     pending.stopIndex = stopIndex;
-    pending.observedIndex = observedIndex;
+    pending.needsDestination = ctx.stops[stopIndex].hasDestination;
+    pending.destinationSatisfied = !pending.needsDestination;
+    size_t pendingIndex = accum.matches.size();
     accum.matches.push_back(pending);
     accum.matchedStopUpdates++;
+    if (pending.needsDestination && (size_t)stopIndex < accum.pendingAwaitingDestination.size()) {
+      accum.pendingAwaitingDestination[stopIndex].push_back(pendingIndex);
+    }
     if (hasStopSequence && (size_t)stopIndex < ctx.stops.size()) {
       ctx.stops[stopIndex].lastStopSeqValid = true;
       ctx.stops[stopIndex].lastStopSeq = stopSequence;
+    }
+  }
+
+  std::vector<int> destinationIndexes;
+  destinationIndexes.reserve(2);
+  findDestinationIndexes(stopId, ctx, destinationIndexes);
+  if (!destinationIndexes.empty()) {
+    for (int destIndex : destinationIndexes) {
+      if (destIndex < 0) continue;
+      if ((size_t)destIndex >= accum.pendingAwaitingDestination.size()) continue;
+      auto& queue = accum.pendingAwaitingDestination[destIndex];
+      if (queue.empty()) continue;
+      for (size_t idx : queue) {
+        if (idx < accum.matches.size()) accum.matches[idx].destinationSatisfied = true;
+      }
+      queue.clear();
     }
   }
   ctx.lastStopSeqValid = hasStopSequence;
@@ -651,7 +652,7 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
     if ((added & 0x3) == 0) yield();
     if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
     auto& stopCtx = ctx.stops[pending.stopIndex];
-    if (!destinationSatisfied(accum, ctx, pending)) continue;
+    if (!destinationSatisfied(pending)) continue;
     time_t dep = clampToTimeT(pending.epoch);
     if (dep == 0) continue;
     if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
