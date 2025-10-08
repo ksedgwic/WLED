@@ -1225,6 +1225,7 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
 #else
   (void)isHttps;
 #endif
+  client->stop();  // ensure any prior socket is closed before reusing
 
   if (!http_.begin(*client, url)) {
     http_.end();
