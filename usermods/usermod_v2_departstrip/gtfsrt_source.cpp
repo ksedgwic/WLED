@@ -192,13 +192,11 @@ struct TripAccumulator {
     std::string tripId;
   } trip;
   std::vector<PendingStop> matches;
-  std::vector<std::vector<size_t>> pendingAwaitingDestination;
   size_t totalStopUpdates = 0;
   size_t matchedStopUpdates = 0;
 
   TripAccumulator() {
     matches.reserve(4);
-    pendingAwaitingDestination.reserve(4);
   }
 };
 
@@ -210,28 +208,13 @@ struct HttpStreamState {
   bool shortRead = false;
 };
 
-static void findMatchingStopIndexes(const std::string& rawId,
+static void findMatchingStopIndexes(const CandidateStopId& cand,
                                     const ParseContext& ctx,
                                     std::vector<int>& out) {
   out.clear();
-  CandidateStopId cand;
-  if (!buildCandidateStopId(rawId, cand)) return;
   for (size_t i = 0; i < ctx.stops.size(); ++i) {
     const auto& stop = ctx.stops[i];
     if (candidateMatches(cand, stop.primary)) out.push_back(static_cast<int>(i));
-  }
-}
-
-static void findDestinationIndexes(const std::string& rawId,
-                                   const ParseContext& ctx,
-                                   std::vector<int>& out) {
-  out.clear();
-  CandidateStopId cand;
-  if (!buildCandidateStopId(rawId, cand)) return;
-  for (size_t i = 0; i < ctx.stops.size(); ++i) {
-    const auto& stop = ctx.stops[i];
-    if (!stop.hasDestination || stop.destination.empty()) continue;
-    if (candidateMatches(cand, stop.destination)) out.push_back(static_cast<int>(i));
   }
 }
 
@@ -520,56 +503,47 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
   }
 
   trimStringInPlace(stopId);
-  if (accum.pendingAwaitingDestination.size() < ctx.stops.size()) {
-    accum.pendingAwaitingDestination.resize(ctx.stops.size());
-  }
+  CandidateStopId cand;
+  if (!buildCandidateStopId(stopId, cand)) return true;
 
   std::vector<int> matchingIndexes;
   matchingIndexes.reserve(4);
-  findMatchingStopIndexes(stopId, ctx, matchingIndexes);
+  findMatchingStopIndexes(cand, ctx, matchingIndexes);
   if (matchingIndexes.empty()) {
     // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
     //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored\n", stopId.c_str());
     // }
-    return true;
-  }
-
-  for (int stopIndex : matchingIndexes) {
-    if (stopIndex < 0) continue;
-    TripAccumulator::PendingStop pending;
-    pending.epoch = chosen;
-    pending.hasSequence = hasStopSequence;
-    pending.stopSequence = stopSequence;
-    pending.stopIndex = stopIndex;
-    pending.needsDestination = ctx.stops[stopIndex].hasDestination;
-    pending.destinationSatisfied = !pending.needsDestination;
-    size_t pendingIndex = accum.matches.size();
-    accum.matches.push_back(pending);
-    accum.matchedStopUpdates++;
-    if (pending.needsDestination && (size_t)stopIndex < accum.pendingAwaitingDestination.size()) {
-      accum.pendingAwaitingDestination[stopIndex].push_back(pendingIndex);
-    }
-    if (hasStopSequence && (size_t)stopIndex < ctx.stops.size()) {
-      ctx.stops[stopIndex].lastStopSeqValid = true;
-      ctx.stops[stopIndex].lastStopSeq = stopSequence;
-    }
-  }
-
-  std::vector<int> destinationIndexes;
-  destinationIndexes.reserve(2);
-  findDestinationIndexes(stopId, ctx, destinationIndexes);
-  if (!destinationIndexes.empty()) {
-    for (int destIndex : destinationIndexes) {
-      if (destIndex < 0) continue;
-      if ((size_t)destIndex >= accum.pendingAwaitingDestination.size()) continue;
-      auto& queue = accum.pendingAwaitingDestination[destIndex];
-      if (queue.empty()) continue;
-      for (size_t idx : queue) {
-        if (idx < accum.matches.size()) accum.matches[idx].destinationSatisfied = true;
+    // Even if no base stop matches, this stop might satisfy a destination.
+  } else {
+    for (int stopIndex : matchingIndexes) {
+      if (stopIndex < 0) continue;
+      TripAccumulator::PendingStop pending;
+      pending.epoch = chosen;
+      pending.hasSequence = hasStopSequence;
+      pending.stopSequence = stopSequence;
+      pending.stopIndex = stopIndex;
+      pending.needsDestination = ctx.stops[stopIndex].hasDestination;
+      pending.destinationSatisfied = !pending.needsDestination;
+      accum.matches.push_back(pending);
+      accum.matchedStopUpdates++;
+      if (hasStopSequence && (size_t)stopIndex < ctx.stops.size()) {
+        ctx.stops[stopIndex].lastStopSeqValid = true;
+        ctx.stops[stopIndex].lastStopSeq = stopSequence;
       }
-      queue.clear();
     }
   }
+
+  for (auto& pending : accum.matches) {
+    if (!pending.needsDestination || pending.destinationSatisfied) continue;
+    if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
+    const auto& stopCtx = ctx.stops[pending.stopIndex];
+    if (stopCtx.destination.empty()) {
+      pending.destinationSatisfied = true;
+      continue;
+    }
+    if (candidateMatches(cand, stopCtx.destination)) pending.destinationSatisfied = true;
+  }
+
   ctx.lastStopSeqValid = hasStopSequence;
   ctx.lastStopSeq = stopSequence;
   return true;
