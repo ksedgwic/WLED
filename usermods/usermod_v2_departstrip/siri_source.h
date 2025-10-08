@@ -29,17 +29,12 @@ private:
   HTTPClient http_;
   std::string configKey_ = "siri_source";
   String   lastStopName_;
-  size_t jsonCapacity_ = 0;
-  DynamicJsonDocument* jsonDoc_ = nullptr;
 
 public:
   explicit SiriSource(const char* key = "siri_source",
                        const char* defAgency = nullptr,
                        const char* defStopCode = nullptr,
                        const char* defBaseUrl = nullptr);
-  ~SiriSource() override;
-  SiriSource(const SiriSource&) = delete;
-  SiriSource& operator=(const SiriSource&) = delete;
   std::unique_ptr<DepartModel> fetch(std::time_t now) override;
   void reload(std::time_t now) override;
   std::string name() const override { return configKey_; }
@@ -63,5 +58,6 @@ private:
   static size_t computeJsonCapacity(int contentLen);
   JsonObject getSiriRoot(DynamicJsonDocument& doc, bool& usedTopLevelFallback);
   bool buildModelFromSiri(JsonObject siri, std::time_t now, std::unique_ptr<DepartModel>& outModel);
-  DynamicJsonDocument& ensureJsonDoc(size_t capacity);
+  static DynamicJsonDocument* acquireJsonDoc(size_t capacity, bool& fromPool);
+  static void releaseJsonDoc(DynamicJsonDocument* doc, bool fromPool);
 };
