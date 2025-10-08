@@ -336,6 +336,10 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
   DepartModel::Entry::Batch batch;
   batch.apiTs = apiTs;
   batch.ourTs = now;
+  if (!visits.isNull()) {
+    size_t cap = visits.size();
+    if (cap > batch.items.capacity()) batch.items.reserve(cap);
+  }
 
   int totalVisits = 0, hadTime = 0, parsedTime = 0;
   String firstStopName;
