@@ -77,8 +77,8 @@ static String jsonFirstString(JsonVariantConst v) {
 }
 
 // Shared JSON buffer reused across all Siri sources to limit heap fragmentation.
-static DynamicJsonDocument* g_siriSharedDoc = nullptr;
-static size_t g_siriSharedCapacity = 0;
+static constexpr size_t SIRI_JSON_POOL = 20000;
+static StaticJsonDocument<SIRI_JSON_POOL> g_siriSharedDoc;
 static bool g_siriDocInUse = false;
 static DynamicJsonDocument* g_siriFallbackDoc = nullptr;
 } // namespace
@@ -200,7 +200,7 @@ bool SiriSource::httpBegin(const String& url, int& outLen) {
   return true;
 }
 
-bool SiriSource::parseJsonFromHttp(DynamicJsonDocument& doc) {
+bool SiriSource::parseJsonFromHttp(JsonDocument& doc) {
   SkipBOMStream s(http_.getStream());
   DeserializationError err;
   // Always apply the narrow filter
@@ -268,35 +268,31 @@ size_t SiriSource::computeJsonCapacity(int contentLen) {
   return 20000; // 20 kB
 }
 
-DynamicJsonDocument* SiriSource::acquireJsonDoc(size_t capacity, bool& fromPool) {
+JsonDocument* SiriSource::acquireJsonDoc(size_t capacity, bool& fromPool) {
   if (capacity < 1024) capacity = 1024;
   fromPool = false;
-  if (!g_siriDocInUse) {
-    if (!g_siriSharedDoc || g_siriSharedCapacity < capacity) {
-      delete g_siriSharedDoc;
-      g_siriSharedDoc = new DynamicJsonDocument(capacity);
-      g_siriSharedCapacity = capacity;
-    }
-    if (g_siriSharedDoc) {
-      g_siriSharedDoc->clear();
-      g_siriDocInUse = true;
-      fromPool = true;
-      return g_siriSharedDoc;
-    }
+  if (!g_siriDocInUse && capacity <= SIRI_JSON_POOL) {
+    g_siriSharedDoc.clear();
+    g_siriDocInUse = true;
+    fromPool = true;
+    return &g_siriSharedDoc;
   }
-  if (!g_siriFallbackDoc) g_siriFallbackDoc = new DynamicJsonDocument(2048);
+  if (!g_siriFallbackDoc || g_siriFallbackDoc->capacity() < capacity) {
+    delete g_siriFallbackDoc;
+    g_siriFallbackDoc = new DynamicJsonDocument(capacity);
+  }
   if (g_siriFallbackDoc) g_siriFallbackDoc->clear();
   return g_siriFallbackDoc;
 }
 
-void SiriSource::releaseJsonDoc(DynamicJsonDocument* doc, bool fromPool) {
+void SiriSource::releaseJsonDoc(JsonDocument* doc, bool fromPool) {
   if (fromPool) {
     g_siriDocInUse = false;
   }
   if (doc) doc->clear();
 }
 
-JsonObject SiriSource::getSiriRoot(DynamicJsonDocument& doc, bool& usedTopLevelFallback) {
+JsonObject SiriSource::getSiriRoot(JsonDocument& doc, bool& usedTopLevelFallback) {
   usedTopLevelFallback = false;
   JsonObject siri = doc["Siri"].as<JsonObject>();
   if (siri.isNull()) {
@@ -464,7 +460,7 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   size_t jsonSz = computeJsonCapacity(len);
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: json capacity=%u, free heap=%u\n", (unsigned)jsonSz, ESP.getFreeHeap());
   bool fromPool = false;
-  DynamicJsonDocument* docPtr = acquireJsonDoc(jsonSz, fromPool);
+  JsonDocument* docPtr = acquireJsonDoc(jsonSz, fromPool);
   if (!docPtr) {
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: failed to acquire JSON buffer"));
     long delay = (long)updateSecs_ * (long)backoffMult_;
@@ -472,7 +468,7 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
     if (backoffMult_ < 16) backoffMult_ *= 2;
     return nullptr;
   }
-  DynamicJsonDocument& doc = *docPtr;
+  JsonDocument& doc = *docPtr;
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: filter=on (len=%d)\n", len);
   if (!parseJsonFromHttp(doc)) {
     releaseJsonDoc(docPtr, fromPool);
