@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <limits>
 #include <string>
@@ -33,13 +34,83 @@ static std::string toLowerCopy(const std::string& s) {
   return out;
 }
 
+struct StopMatchData {
+  std::string fullStd;
+  std::string fullLower;
+  std::string tailStd;
+  std::string tailLower;
+
+  bool empty() const {
+    return fullStd.empty() && tailStd.empty();
+  }
+};
+
+struct CandidateStopId {
+  std::string full;
+  std::string lower;
+  std::string tail;
+  std::string tailLower;
+
+  void clear() {
+    full.clear();
+    lower.clear();
+    tail.clear();
+    tailLower.clear();
+  }
+};
+
+static void populateMatchData(const String& agency, const String& token, StopMatchData& out) {
+  String trimmed = token;
+  trimmed.trim();
+  out.tailStd = std::string(trimmed.c_str());
+  trimStringInPlace(out.tailStd);
+  out.tailLower = toLowerCopy(out.tailStd);
+  if (agency.length() > 0 && out.tailStd.length() > 0) {
+    String full = agency + ':' + trimmed;
+    out.fullStd = std::string(full.c_str());
+    trimStringInPlace(out.fullStd);
+    out.fullLower = toLowerCopy(out.fullStd);
+  } else {
+    out.fullStd = out.tailStd;
+    out.fullLower = out.tailLower;
+  }
+}
+
+static bool buildCandidateStopId(const std::string& rawId, CandidateStopId& out) {
+  out.clear();
+  if (rawId.empty()) return false;
+  out.full = rawId;
+  trimStringInPlace(out.full);
+  if (out.full.empty()) return false;
+  out.lower = toLowerCopy(out.full);
+  size_t colon = out.full.find(':');
+  if (colon != std::string::npos && colon + 1 < out.full.size()) {
+    out.tail = out.full.substr(colon + 1);
+    trimStringInPlace(out.tail);
+    if (!out.tail.empty()) out.tailLower = toLowerCopy(out.tail);
+  }
+  return true;
+}
+
+static bool candidateMatches(const CandidateStopId& cand, const StopMatchData& match) {
+  if (match.empty()) return false;
+  if (!match.fullStd.empty() && (cand.full == match.fullStd || cand.lower == match.fullLower)) return true;
+  if (!match.tailStd.empty()) {
+    if (cand.full == match.tailStd || cand.lower == match.tailLower) return true;
+    if (!cand.tail.empty()) {
+      if (cand.tail == match.tailStd) return true;
+      if (!cand.tailLower.empty() && cand.tailLower == match.tailLower) return true;
+    }
+  }
+  return false;
+}
+
 struct ParseContext {
   struct StopContext {
     String stopCode;                // e.g. "900202"
-    std::string fullStd;            // e.g. "BA:900202"
-    std::string fullLower;
-    std::string tailStd;            // e.g. "900202"
-    std::string tailLower;
+    StopMatchData primary;
+    StopMatchData destination;
+    bool hasDestination = false;
     std::vector<DepartModel::Entry::Item> items;
     bool lastStopSeqValid = false;
     uint32_t lastStopSeq = 0;
@@ -65,12 +136,11 @@ struct ParseContext {
     if (stopCodesIn.empty()) {
       StopContext sc;
       sc.stopCode = String();
-      sc.tailStd.clear();
-      sc.tailLower.clear();
       if (agency.length() > 0) {
         String full = agency + ':';
-        sc.fullStd = std::string(full.c_str());
-        sc.fullLower = toLowerCopy(sc.fullStd);
+        sc.primary.fullStd = std::string(full.c_str());
+        trimStringInPlace(sc.primary.fullStd);
+        sc.primary.fullLower = toLowerCopy(sc.primary.fullStd);
       }
       sc.items.reserve(16);
       stops.push_back(std::move(sc));
@@ -78,19 +148,28 @@ struct ParseContext {
       for (const String& raw : stopCodesIn) {
         String trimmed = raw;
         trimmed.trim();
+        int arrowPos = trimmed.indexOf(F("->"));
+        String baseToken = trimmed;
+        String destToken;
+        if (arrowPos >= 0) {
+          baseToken = trimmed.substring(0, arrowPos);
+          destToken = trimmed.substring(arrowPos + 2);
+        }
+        baseToken.trim();
+        destToken.trim();
+
         StopContext sc;
-        sc.stopCode = trimmed;
-        sc.tailStd = std::string(trimmed.c_str());
-        trimStringInPlace(sc.tailStd);
-        sc.tailLower = toLowerCopy(sc.tailStd);
-        if (agency.length() > 0 && sc.tailStd.length() > 0) {
-          String full = agency + ':' + trimmed;
-          sc.fullStd = std::string(full.c_str());
-          trimStringInPlace(sc.fullStd);
-          sc.fullLower = toLowerCopy(sc.fullStd);
+        if (destToken.length() > 0) {
+          sc.stopCode = baseToken;
+          sc.stopCode += F("->");
+          sc.stopCode += destToken;
         } else {
-          sc.fullStd = sc.tailStd;
-          sc.fullLower = sc.tailLower;
+          sc.stopCode = baseToken;
+        }
+        populateMatchData(agency, baseToken, sc.primary);
+        if (destToken.length() > 0) {
+          populateMatchData(agency, destToken, sc.destination);
+          sc.hasDestination = !sc.destination.empty();
         }
         sc.items.reserve(16);
         stops.push_back(std::move(sc));
@@ -105,16 +184,26 @@ struct TripAccumulator {
     bool hasSequence = false;
     uint32_t stopSequence = 0;
     int stopIndex = -1;
+    size_t observedIndex = SIZE_MAX;
+  };
+  struct ObservedStop {
+    std::string stopId;
+    bool hasSequence = false;
+    uint32_t stopSequence = 0;
   };
   struct TripInfo {
     std::string routeId;
     std::string tripId;
   } trip;
   std::vector<PendingStop> matches;
+  std::vector<ObservedStop> observedStops;
   size_t totalStopUpdates = 0;
   size_t matchedStopUpdates = 0;
 
-  TripAccumulator() { matches.reserve(4); }
+  TripAccumulator() {
+    matches.reserve(4);
+    observedStops.reserve(16);
+  }
 };
 
 struct HttpStreamState {
@@ -125,30 +214,47 @@ struct HttpStreamState {
   bool shortRead = false;
 };
 
-static int matchStopId(const std::string& rawId, const ParseContext& ctx) {
-  if (rawId.empty()) return -1;
-  std::string cand = rawId;
-  trimStringInPlace(cand);
-  if (cand.empty()) return -1;
-  std::string candLower = toLowerCopy(cand);
-  std::string tail;
-  std::string tailLower;
-  size_t colon = cand.find(':');
-  if (colon != std::string::npos && colon + 1 < cand.size()) {
-    tail = cand.substr(colon + 1);
-    trimStringInPlace(tail);
-    if (!tail.empty()) tailLower = toLowerCopy(tail);
-  }
-
+static void findMatchingStopIndexes(const std::string& rawId,
+                                    const ParseContext& ctx,
+                                    std::vector<int>& out) {
+  out.clear();
+  CandidateStopId cand;
+  if (!buildCandidateStopId(rawId, cand)) return;
   for (size_t i = 0; i < ctx.stops.size(); ++i) {
     const auto& stop = ctx.stops[i];
-    if (!stop.fullStd.empty() && (cand == stop.fullStd || candLower == stop.fullLower)) return (int)i;
-    if (!stop.tailStd.empty()) {
-      if (cand == stop.tailStd || candLower == stop.tailLower) return (int)i;
-      if (!tail.empty() && (tail == stop.tailStd || tailLower == stop.tailLower)) return (int)i;
-    }
+    if (candidateMatches(cand, stop.primary)) out.push_back(static_cast<int>(i));
   }
-  return -1;
+}
+
+static bool destinationSatisfied(const TripAccumulator& accum,
+                                 const ParseContext& ctx,
+                                 const TripAccumulator::PendingStop& pending) {
+  if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) return false;
+  const auto& stopCtx = ctx.stops[pending.stopIndex];
+  if (!stopCtx.hasDestination) return true;
+  if (pending.observedIndex == SIZE_MAX || pending.observedIndex >= accum.observedStops.size()) return false;
+  if (stopCtx.destination.empty()) return true;
+
+  const auto& observedStops = accum.observedStops;
+  auto matchesAtIndex = [&](size_t idx) -> bool {
+    if (idx >= observedStops.size()) return false;
+    const auto& obs = observedStops[idx];
+    if (obs.stopId.empty()) return false;
+    CandidateStopId cand;
+    if (!buildCandidateStopId(obs.stopId, cand)) return false;
+    return candidateMatches(cand, stopCtx.destination);
+  };
+
+  if (matchesAtIndex(pending.observedIndex)) return true;
+
+  uint32_t baseSeq = pending.stopSequence;
+  bool enforceSeq = pending.hasSequence;
+  for (size_t i = pending.observedIndex + 1; i < observedStops.size(); ++i) {
+    const auto& obs = observedStops[i];
+    if (enforceSeq && obs.hasSequence && obs.stopSequence <= baseSeq) continue;
+    if (matchesAtIndex(i)) return true;
+  }
+  return false;
 }
 
 static void splitStopCodes(const String& input, std::vector<String>& out) {
@@ -430,27 +536,41 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
     return true;
   }
 
-  int stopIndex = matchStopId(stopId, ctx);
-  if (stopIndex < 0) {
+  trimStringInPlace(stopId);
+  TripAccumulator::ObservedStop observed;
+  observed.stopId = stopId;
+  observed.hasSequence = hasStopSequence;
+  observed.stopSequence = stopSequence;
+  accum.observedStops.push_back(std::move(observed));
+  size_t observedIndex = accum.observedStops.size() - 1;
+
+  std::vector<int> matchingIndexes;
+  matchingIndexes.reserve(4);
+  findMatchingStopIndexes(stopId, ctx, matchingIndexes);
+  if (matchingIndexes.empty()) {
     // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
     //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored\n", stopId.c_str());
     // }
     return true;
   }
 
-  TripAccumulator::PendingStop pending;
-  pending.epoch = chosen;
-  pending.hasSequence = hasStopSequence;
-  pending.stopSequence = stopSequence;
-  pending.stopIndex = stopIndex;
-  accum.matches.push_back(pending);
-  accum.matchedStopUpdates++;
+  for (int stopIndex : matchingIndexes) {
+    if (stopIndex < 0) continue;
+    TripAccumulator::PendingStop pending;
+    pending.epoch = chosen;
+    pending.hasSequence = hasStopSequence;
+    pending.stopSequence = stopSequence;
+    pending.stopIndex = stopIndex;
+    pending.observedIndex = observedIndex;
+    accum.matches.push_back(pending);
+    accum.matchedStopUpdates++;
+    if (hasStopSequence && (size_t)stopIndex < ctx.stops.size()) {
+      ctx.stops[stopIndex].lastStopSeqValid = true;
+      ctx.stops[stopIndex].lastStopSeq = stopSequence;
+    }
+  }
   ctx.lastStopSeqValid = hasStopSequence;
   ctx.lastStopSeq = stopSequence;
-  if (hasStopSequence && stopIndex >= 0 && (size_t)stopIndex < ctx.stops.size()) {
-    ctx.stops[stopIndex].lastStopSeqValid = true;
-    ctx.stops[stopIndex].lastStopSeq = stopSequence;
-  }
   return true;
 }
 
@@ -531,6 +651,7 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
     if ((added & 0x3) == 0) yield();
     if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
     auto& stopCtx = ctx.stops[pending.stopIndex];
+    if (!destinationSatisfied(accum, ctx, pending)) continue;
     time_t dep = clampToTimeT(pending.epoch);
     if (dep == 0) continue;
     if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
@@ -1008,9 +1129,30 @@ bool GtfsRtSource::readFromConfig(JsonObject& root, bool startup_complete, bool&
   stopCodes_ = std::move(newStops);
   for (auto& sc : stopCodes_) {
     sc.trim();
-    int colonPos = sc.lastIndexOf(':');
-    if (colonPos >= 0) sc = sc.substring(colonPos + 1);
-    sc.trim();
+    String base = sc;
+    String dest;
+    int arrowPos = sc.indexOf(F("->"));
+    if (arrowPos >= 0) {
+      base = sc.substring(0, arrowPos);
+      dest = sc.substring(arrowPos + 2);
+    }
+    base.trim();
+    dest.trim();
+    int colonBase = base.lastIndexOf(':');
+    if (colonBase >= 0) base = base.substring(colonBase + 1);
+    base.trim();
+    if (dest.length() > 0) {
+      int colonDest = dest.lastIndexOf(':');
+      if (colonDest >= 0) dest = dest.substring(colonDest + 1);
+      dest.trim();
+    }
+    if (dest.length() > 0) {
+      sc = base;
+      sc += F("->");
+      sc += dest;
+    } else {
+      sc = base;
+    }
   }
   if (stopCodes_.size() > 1) {
     std::vector<String> unique;
