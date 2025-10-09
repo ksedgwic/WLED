@@ -947,7 +947,9 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
 
   int contentLen = 0;
   int httpStatus = 0;
-  if (!httpBegin(url, contentLen, httpStatus)) {
+  HTTPClient http;
+  bool usedSecure = false;
+  if (!httpBegin(url, contentLen, httpStatus, http, usedSecure)) {
     long delay = (long)updateSecs_ * (long)backoffMult_;
     DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: scheduling backoff x%u %s for %lds (HTTP error)\n",
                  (unsigned)backoffMult_, sourceKey().c_str(), delay);
@@ -956,11 +958,11 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
     return nullptr;
   }
 
-  String ctype = http_.header("Content-Type");
-  String clen = http_.header("Content-Length");
-  String cenc = http_.header("Content-Encoding");
-  String tenc = http_.header("Transfer-Encoding");
-  String rateRemain = http_.header("RateLimit-Remaining");
+  String ctype = http.header("Content-Type");
+  String clen = http.header("Content-Length");
+  String cenc = http.header("Content-Encoding");
+  String tenc = http.header("Transfer-Encoding");
+  String rateRemain = http.header("RateLimit-Remaining");
   if (rateRemain.length() > 0) {
     DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: RateLimit-Remaining=%s\n", rateRemain.c_str());
   }
@@ -976,11 +978,11 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
   const char* decodeErr = nullptr;
   bool parsed = false;
 
-  Stream& body = http_.getStream();
+  Stream& body = http.getStream();
   size_t streamLen = (contentLen > 0) ? (size_t)contentLen : 0;
   parsed = parseGtfsRtStream(body, streamLen, ctx, &decodeErr);
 
-  closeHttpClient();
+  closeHttpClient(http, usedSecure);
 
   nextFetch_ = now + updateSecs_;
   backoffMult_ = 1;
@@ -1218,17 +1220,16 @@ String GtfsRtSource::composeUrl(const String& agency, const String& stopCode) co
   return url;
 }
 
-bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
-  http_.setTimeout(10000);
-
+bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus, HTTPClient& http, bool& usedSecure) {
+  http.setTimeout(10000);
   bool isHttps = url.startsWith(F("https://")) || url.startsWith(F("HTTPS://"));
-  lastClientSecure_ = false;
+  usedSecure = false;
   WiFiClient* client = &client_;
   client_.setTimeout(10000);
   client_.stop();
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
   if (isHttps) {
-    lastClientSecure_ = true;
+    usedSecure = true;
     clientSecure_.stop();
     clientSecure_.setTimeout(10000);
     clientSecure_.setInsecure();
@@ -1239,21 +1240,21 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
 #endif
   client->stop();  // ensure any prior socket is closed before reusing
 
-  if (!http_.begin(*client, url)) {
-    http_.end();
+  if (!http.begin(*client, url)) {
+    http.end();
     client->stop();
     DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: begin() failed"));
     return false;
   }
-  http_.useHTTP10(true);
-  http_.setUserAgent("WLED-GTFSRT/0.1");
-  http_.setReuse(false);
-  http_.addHeader("Connection", "close");
-  http_.addHeader("Accept", "application/octet-stream", true, true);
+  http.useHTTP10(true);
+  http.setUserAgent("WLED-GTFSRT/0.1");
+  http.setReuse(false);
+  http.addHeader("Connection", "close");
+  http.addHeader("Accept", "application/octet-stream", true, true);
   static const char* hdrs[] = {"Content-Type", "Content-Length", "Content-Encoding", "Transfer-Encoding", "RateLimit-Remaining"};
-  http_.collectHeaders(hdrs, 5);
+  http.collectHeaders(hdrs, 5);
 
-  int status = http_.GET();
+  int status = http.GET();
   if (status < 200 || status >= 300) {
     if (status < 0) {
       String err = HTTPClient::errorToString(status);
@@ -1261,20 +1262,20 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
     } else {
       DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: HTTP status %d\n", status);
     }
-    http_.end();
+    http.end();
     client->stop();
     return false;
   }
 
   outStatus = status;
-  outLen = http_.getSize();
+  outLen = http.getSize();
   return true;
 }
 
-void GtfsRtSource::closeHttpClient() {
-  http_.end();
+void GtfsRtSource::closeHttpClient(HTTPClient& http, bool usedSecure) {
+  http.end();
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
-  if (lastClientSecure_) {
+  if (usedSecure) {
     clientSecure_.stop();
   } else {
     client_.stop();
@@ -1282,5 +1283,4 @@ void GtfsRtSource::closeHttpClient() {
 #else
   client_.stop();
 #endif
-  lastClientSecure_ = false;
 }
