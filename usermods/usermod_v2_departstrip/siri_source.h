@@ -4,8 +4,8 @@
 #include <vector>
 #include "interfaces.h"
 #include "depart_model.h"
+#include "http_transport.h"
 #include "wled.h"
-#include <WiFiClient.h>
 #if defined(ARDUINO_ARCH_ESP8266)
   #include <ESP8266HTTPClient.h>
 #else
@@ -25,10 +25,12 @@ private:
   time_t   nextFetch_ = 0;
   uint8_t  backoffMult_ = 1;
   time_t   lastBackoffLog_ = 0;
-  WiFiClient client_;
+  departstrip::net::HttpTransport httpTransport_;
   HTTPClient http_;
   std::string configKey_ = "siri_source";
   String   lastStopName_;
+  bool httpActive_ = false;
+  bool httpUsedSecure_ = false;
 
 public:
   explicit SiriSource(const char* key = "siri_source",
@@ -60,4 +62,5 @@ private:
   bool buildModelFromSiri(JsonObject siri, std::time_t now, std::unique_ptr<DepartModel>& outModel);
   static JsonDocument* acquireJsonDoc(size_t capacity, bool& fromPool);
   static void releaseJsonDoc(JsonDocument* doc, bool fromPool);
+  void endHttp();
 };
