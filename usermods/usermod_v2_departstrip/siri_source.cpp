@@ -86,9 +86,12 @@ static String jsonFirstString(JsonVariantConst v) {
 }
 
 // Shared JSON buffer reused across all Siri sources to limit heap fragmentation.
-static constexpr size_t SIRI_JSON_MAX_CAP = 10000;
+static constexpr size_t SIRI_JSON_MAX_CAP = 24576;
+static constexpr size_t SIRI_JSON_MIN_CAP = 4096;
+static constexpr size_t SIRI_JSON_QUANTUM = 2048;
 static DynamicJsonDocument* g_siriSharedDoc = nullptr;
 static bool g_siriSharedInUse = false;
+static size_t g_siriSharedDocCap = 0;
 } // namespace
 
 SiriSource::SiriSource(const char* key, const char* defAgency, const char* defStopCode, const char* defBaseUrl) {
@@ -264,41 +267,48 @@ bool SiriSource::parseJsonFromHttp(JsonDocument& doc) {
                (unsigned)s.bytesConsumed(), (unsigned)doc.memoryUsage(), ESP.getFreeHeap());
   if (err) {
     DEBUG_PRINTF("DepartStrip: SiriSource::fetch: deserializeJson failed: %s\n", err.c_str());
+    if (err == DeserializationError::NoMemory && lastJsonCapacity_ < SIRI_JSON_MAX_CAP) {
+      size_t bumped = lastJsonCapacity_ + SIRI_JSON_QUANTUM;
+      if (bumped > SIRI_JSON_MAX_CAP) bumped = SIRI_JSON_MAX_CAP;
+      lastJsonCapacity_ = bumped;
+    }
     return false;
   }
   return true;
 }
 
 size_t SiriSource::computeJsonCapacity(int contentLen) {
-  // If we know the content length, estimate needed capacity much smaller
-  // due to the active filter, then quantize to reduce fragmentation.
+  size_t target = lastJsonCapacity_;
   if (contentLen > 0) {
     size_t len = (size_t)contentLen;
-    // Empirical: filtered docs for 3–32 visits use ~6–16KB once expanded.
-    // Heuristic: 3/4 payload + 4KB headroom, with a 12KB floor.
-    size_t estimate = (len * 3) / 4 + 4096;
-    if (estimate < 12288) estimate = 12288; // 12KB minimum
-    // Quantize to 4KB chunks for allocator friendliness.
-    const size_t quantum = 4096;
-    size_t rounded = ((estimate + quantum - 1) / quantum) * quantum;
-    if (rounded > SIRI_JSON_MAX_CAP) rounded = SIRI_JSON_MAX_CAP;
-    return rounded;
+    // Empirical: filtered docs for 3–32 visits use ~0.35–0.55x of payload.
+    // Heuristic: 0.6 * payload + 2KB headroom.
+    size_t estimate = (len * 3) / 5 + 2048;
+    if (estimate > target) target = estimate;
   }
-  // Unknown length (e.g., chunked): default to the shared doc max (32KB).
-  return SIRI_JSON_MAX_CAP;
+  if (target < SIRI_JSON_MIN_CAP) target = SIRI_JSON_MIN_CAP;
+  if (target > SIRI_JSON_MAX_CAP) target = SIRI_JSON_MAX_CAP;
+  target = ((target + SIRI_JSON_QUANTUM - 1) / SIRI_JSON_QUANTUM) * SIRI_JSON_QUANTUM;
+  if (target > SIRI_JSON_MAX_CAP) target = SIRI_JSON_MAX_CAP;
+  return target;
 }
 
 JsonDocument* SiriSource::acquireJsonDoc(size_t capacity, bool& fromPool) {
   if (capacity < 1024) capacity = 1024;
   fromPool = false;
   if (!g_siriSharedDoc) {
-    g_siriSharedDoc = new DynamicJsonDocument(SIRI_JSON_MAX_CAP);
-  }
-  if (!g_siriSharedInUse) {
-    if (g_siriSharedDoc->capacity() < SIRI_JSON_MAX_CAP) {
+    g_siriSharedDoc = new DynamicJsonDocument(capacity);
+    g_siriSharedDocCap = g_siriSharedDoc ? capacity : 0;
+    if (!g_siriSharedDoc) return nullptr;
+  } else if (!g_siriSharedInUse) {
+    if (capacity > g_siriSharedDocCap || (g_siriSharedDocCap > capacity + SIRI_JSON_QUANTUM && capacity >= SIRI_JSON_MIN_CAP)) {
       delete g_siriSharedDoc;
-      g_siriSharedDoc = new DynamicJsonDocument(SIRI_JSON_MAX_CAP);
+      g_siriSharedDoc = new DynamicJsonDocument(capacity);
+      g_siriSharedDocCap = g_siriSharedDoc ? capacity : 0;
+      if (!g_siriSharedDoc) return nullptr;
     }
+  }
+  if (g_siriSharedDoc && !g_siriSharedInUse) {
     g_siriSharedDoc->clear();
     g_siriSharedInUse = true;
     fromPool = true;
@@ -306,7 +316,7 @@ JsonDocument* SiriSource::acquireJsonDoc(size_t capacity, bool& fromPool) {
   }
   // Fallback allocation; caller is responsible for deleting via releaseJsonDoc.
   DynamicJsonDocument* temp = new DynamicJsonDocument(capacity);
-  temp->clear();
+  if (temp) temp->clear();
   return temp;
 }
 
@@ -486,7 +496,8 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   }
 
   size_t jsonSz = computeJsonCapacity(len);
-  DEBUG_PRINTF("DepartStrip: SiriSource::fetch: json capacity=%u, free heap=%u\n", (unsigned)jsonSz, ESP.getFreeHeap());
+  DEBUG_PRINTF("DepartStrip: SiriSource::fetch: json capacity=%u (hint=%u) free heap=%u\n",
+               (unsigned)jsonSz, (unsigned)lastJsonCapacity_, ESP.getFreeHeap());
   bool fromPool = false;
   JsonDocument* docPtr = acquireJsonDoc(jsonSz, fromPool);
   if (!docPtr) {
@@ -502,6 +513,11 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   bool parsed = parseJsonFromHttp(doc);
   endHttp();
   if (!parsed) {
+    if (lastJsonCapacity_ < SIRI_JSON_MAX_CAP) {
+      size_t bumped = jsonSz + SIRI_JSON_QUANTUM;
+      if (bumped > SIRI_JSON_MAX_CAP) bumped = SIRI_JSON_MAX_CAP;
+      if (bumped > lastJsonCapacity_) lastJsonCapacity_ = bumped;
+    }
     releaseJsonDoc(docPtr, fromPool);
     long delay = (long)updateSecs_ * (long)backoffMult_;
     DEBUG_PRINTF("DepartStrip: SiriSource::fetch: scheduling backoff x%u %s for %lds (parse error)\n",
@@ -514,6 +530,16 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   bool usedTop = false;
   JsonObject siri = getSiriRoot(doc, usedTop);
   if (usedTop) DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: using top-level as Siri container"));
+  {
+    size_t used = doc.memoryUsage();
+    size_t desired = used + 2048;
+    if (desired < SIRI_JSON_MIN_CAP) desired = SIRI_JSON_MIN_CAP;
+    desired = ((desired + SIRI_JSON_QUANTUM - 1) / SIRI_JSON_QUANTUM) * SIRI_JSON_QUANTUM;
+    if (desired > SIRI_JSON_MAX_CAP) desired = SIRI_JSON_MAX_CAP;
+    lastJsonCapacity_ = desired;
+    DEBUG_PRINTF("DepartStrip: SiriSource::fetch: json usage=%u nextHint=%u\n",
+                 (unsigned)used, (unsigned)lastJsonCapacity_);
+  }
   if (siri.isNull()) {
     releaseJsonDoc(docPtr, fromPool);
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: missing Siri root"));
