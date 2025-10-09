@@ -980,7 +980,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
   size_t streamLen = (contentLen > 0) ? (size_t)contentLen : 0;
   parsed = parseGtfsRtStream(body, streamLen, ctx, &decodeErr);
 
-  http_.end();
+  closeHttpClient();
 
   nextFetch_ = now + updateSecs_;
   backoffMult_ = 1;
@@ -1222,10 +1222,14 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
   http_.setTimeout(10000);
 
   bool isHttps = url.startsWith(F("https://")) || url.startsWith(F("HTTPS://"));
+  lastClientSecure_ = false;
   WiFiClient* client = &client_;
   client_.setTimeout(10000);
+  client_.stop();
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
   if (isHttps) {
+    lastClientSecure_ = true;
+    clientSecure_.stop();
     clientSecure_.setTimeout(10000);
     clientSecure_.setInsecure();
     client = &clientSecure_;
@@ -1237,6 +1241,7 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
 
   if (!http_.begin(*client, url)) {
     http_.end();
+    client->stop();
     DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: begin() failed"));
     return false;
   }
@@ -1257,10 +1262,25 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus) {
       DEBUG_PRINTF("DepartStrip: GtfsRtSource::fetch: HTTP status %d\n", status);
     }
     http_.end();
+    client->stop();
     return false;
   }
 
   outStatus = status;
   outLen = http_.getSize();
   return true;
+}
+
+void GtfsRtSource::closeHttpClient() {
+  http_.end();
+#if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
+  if (lastClientSecure_) {
+    clientSecure_.stop();
+  } else {
+    client_.stop();
+  }
+#else
+  client_.stop();
+#endif
+  lastClientSecure_ = false;
 }
