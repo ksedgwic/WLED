@@ -191,12 +191,20 @@ struct TripAccumulator {
     std::string routeId;
     std::string tripId;
   } trip;
-  std::vector<PendingStop> matches;
+  static constexpr size_t kMaxPendingStops = 32;
+  PendingStop matches[kMaxPendingStops];
+  size_t matchCount = 0;
+  bool matchOverflow = false;
   size_t totalStopUpdates = 0;
   size_t matchedStopUpdates = 0;
 
-  TripAccumulator() {
-    matches.reserve(4);
+  bool addMatch(const PendingStop& pending) {
+    if (matchCount < kMaxPendingStops) {
+      matches[matchCount++] = pending;
+      return true;
+    }
+    matchOverflow = true;
+    return false;
   }
 };
 
@@ -542,8 +550,13 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
       pending.stopIndex = stopIndex;
       pending.needsDestination = ctx.stops[stopIndex].hasDestination;
       pending.destinationSatisfied = !pending.needsDestination;
-      accum.matches.push_back(pending);
+      bool overflowedBefore = accum.matchOverflow;
+      bool stored = accum.addMatch(pending);
       accum.matchedStopUpdates++;
+      if (!stored && !overflowedBefore && ctx.stopUpdatesTotal <= 5) {
+        DEBUG_PRINTF("DepartStrip: GTFS-RT TripAccumulator pending buffer full (max=%u)\n",
+                     (unsigned)TripAccumulator::kMaxPendingStops);
+      }
       if (hasStopSequence && (size_t)stopIndex < ctx.stops.size()) {
         ctx.stops[stopIndex].lastStopSeqValid = true;
         ctx.stops[stopIndex].lastStopSeq = stopSequence;
@@ -551,7 +564,8 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
     }
   }
 
-  for (auto& pending : accum.matches) {
+  for (size_t idx = 0; idx < accum.matchCount; ++idx) {
+    auto& pending = accum.matches[idx];
     if (!pending.needsDestination || pending.destinationSatisfied) continue;
     if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
     const auto& stopCtx = ctx.stops[pending.stopIndex];
@@ -629,9 +643,9 @@ static time_t clampToTimeT(int64_t value) {
 }
 
 static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
-  if (accum.matches.empty()) return 0;
+  if (accum.matchCount == 0) return 0;
   //DEBUG_PRINTF("DepartStrip: GTFS-RT flushing %u pending matches (route='%s' trip='%s')\n",
-  //             (unsigned)accum.matches.size(),
+  //             (unsigned)accum.matchCount,
   //             accum.trip.routeId.c_str(),
   //             accum.trip.tripId.c_str());
   String lineRef;
@@ -640,7 +654,8 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
   if (lineRef.length() == 0) lineRef = F("?");
 
   size_t added = 0;
-  for (const auto& pending : accum.matches) {
+  for (size_t idx = 0; idx < accum.matchCount; ++idx) {
+    const auto& pending = accum.matches[idx];
     if ((added & 0x3) == 0) yield();
     if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
     auto& stopCtx = ctx.stops[pending.stopIndex];
