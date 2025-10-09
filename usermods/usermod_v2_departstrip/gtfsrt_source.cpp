@@ -208,14 +208,25 @@ struct HttpStreamState {
   bool shortRead = false;
 };
 
-static void findMatchingStopIndexes(const CandidateStopId& cand,
-                                    const ParseContext& ctx,
-                                    std::vector<int>& out) {
-  out.clear();
+static size_t findMatchingStopIndexes(const CandidateStopId& cand,
+                                      const ParseContext& ctx,
+                                      int* out,
+                                      size_t maxOut,
+                                      bool& overflowed) {
+  overflowed = false;
+  if (!out || maxOut == 0) return 0;
+  size_t count = 0;
   for (size_t i = 0; i < ctx.stops.size(); ++i) {
     const auto& stop = ctx.stops[i];
-    if (candidateMatches(cand, stop.primary)) out.push_back(static_cast<int>(i));
+    if (!candidateMatches(cand, stop.primary)) continue;
+    if (count < maxOut) {
+      out[count++] = static_cast<int>(i);
+    } else {
+      overflowed = true;
+      break;
+    }
   }
+  return count;
 }
 
 static bool destinationSatisfied(const TripAccumulator::PendingStop& pending) {
@@ -506,16 +517,23 @@ static bool decodeStopTimeUpdate(pb_istream_t* stream, TripAccumulator& accum, P
   CandidateStopId cand;
   if (!buildCandidateStopId(stopId, cand)) return true;
 
-  std::vector<int> matchingIndexes;
-  matchingIndexes.reserve(4);
-  findMatchingStopIndexes(cand, ctx, matchingIndexes);
-  if (matchingIndexes.empty()) {
+  constexpr size_t kMaxStopMatches = 8;
+  int matchingIndexes[kMaxStopMatches];
+  bool matchOverflow = false;
+  size_t matchCount = findMatchingStopIndexes(cand, ctx, matchingIndexes, kMaxStopMatches, matchOverflow);
+  if (matchOverflow && ctx.stopUpdatesTotal <= 5) {
+    DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' matched more than %u stops; truncating list\n",
+                 stopId.c_str(),
+                 (unsigned)kMaxStopMatches);
+  }
+  if (matchCount == 0) {
     // if (ctx.stopUpdatesTotal <= 5 || (ctx.stopUpdatesTotal % 200) == 0) {
     //   DEBUG_PRINTF("DepartStrip: GTFS-RT stop_id '%s' ignored\n", stopId.c_str());
     // }
     // Even if no base stop matches, this stop might satisfy a destination.
   } else {
-    for (int stopIndex : matchingIndexes) {
+    for (size_t idx = 0; idx < matchCount; ++idx) {
+      int stopIndex = matchingIndexes[idx];
       if (stopIndex < 0) continue;
       TripAccumulator::PendingStop pending;
       pending.epoch = chosen;
