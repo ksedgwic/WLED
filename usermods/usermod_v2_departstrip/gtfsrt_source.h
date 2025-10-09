@@ -33,6 +33,7 @@ private:
   WiFiClientSecure clientSecure_;
 #endif
   HTTPClient http_;
+  bool lastClientSecure_ = false;
 
 public:
   explicit GtfsRtSource(const char* key = "gtfsrt_source");
@@ -53,4 +54,5 @@ public:
 private:
   String composeUrl(const String& agency, const String& stopCode) const;
   bool httpBegin(const String& url, int& outLen, int& outStatus);
+  void closeHttpClient();
 };
