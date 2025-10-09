@@ -412,13 +412,19 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
       DepartModel::Entry::Item item;
       item.estDep = depUtc;
       // LineRef may be nested or plain; handle both
-      if (mvj["LineRef"].is<JsonObject>()) item.lineRef = (const char*)(mvj["LineRef"]["value"] | "");
-      else item.lineRef = (const char*)(mvj["LineRef"] | "");
-      if (item.lineRef.length() == 0) {
-        String fallback = jsonFirstString(mvj["PublishedLineName"]);
-        if (fallback.length()) item.lineRef = fallback;
+      String label;
+      if (mvj["LineRef"].is<JsonObject>()) {
+        const char* raw = mvj["LineRef"]["value"] | "";
+        if (raw && *raw) label = raw;
+      } else {
+        const char* raw = mvj["LineRef"] | "";
+        if (raw && *raw) label = raw;
       }
-      item.lineRef = departstrip::util::formatLineLabel(agency_, item.lineRef);
+      if (label.length() == 0) {
+        label = jsonFirstString(mvj["PublishedLineName"]);
+      }
+      String formatted = departstrip::util::formatLineLabel(agency_, label);
+      item.lineRef = std::move(formatted);
       batch.items.push_back(std::move(item));
     } else if (hasTime && parsedTime < 3) {
       const char* dbg = expectedStr ? expectedStr : aimedStr;
