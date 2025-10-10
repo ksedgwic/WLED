@@ -360,7 +360,9 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: visits null=%d size=%u\n", visits.isNull(), (unsigned)(visits.isNull() ? 0 : visits.size()));
   if (visits.isNull()) {
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: no MonitoredStopVisit array"));
-    return false;
+    DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: assuming empty departures for this stop"));
+    outModel = makeEmptyModel(apiTs, now);
+    return true;
   }
 
   DepartModel::Entry board;
@@ -434,7 +436,10 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
 
   if (batch.items.empty()) {
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: no items parsed"));
-    return false;
+    outModel = makeEmptyModel(apiTs, now);
+    if (firstStopName.length() > 0) lastStopName_ = firstStopName;
+    DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: treating as empty departures"));
+    return true;
   }
 
   std::sort(batch.items.begin(), batch.items.end(), [](const DepartModel::Entry::Item& a, const DepartModel::Entry::Item& b){ return a.estDep < b.estDep; });
@@ -446,6 +451,19 @@ bool SiriSource::buildModelFromSiri(JsonObject siri, std::time_t now, std::uniqu
   outModel = std::move(model);
   if (firstStopName.length() > 0) lastStopName_ = firstStopName;
   return true;
+}
+
+std::unique_ptr<DepartModel> SiriSource::makeEmptyModel(std::time_t apiTs, std::time_t now) const {
+  std::unique_ptr<DepartModel> model(new DepartModel());
+  DepartModel::Entry board;
+  board.key.reserve(agency_.length() + 1 + stopCode_.length());
+  board.key = agency_;
+  board.key += ":";
+  board.key += stopCode_;
+  board.batch.apiTs = apiTs ? apiTs : now;
+  board.batch.ourTs = now;
+  model->boards.push_back(std::move(board));
+  return model;
 }
 
 std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
@@ -532,6 +550,15 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
     return nullptr;
   }
 
+  size_t docUsage = doc.memoryUsage();
+  if (docUsage == 0) {
+    DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: parsed doc empty, treating as no departures"));
+    releaseJsonDoc(docPtr, fromPool);
+    nextFetch_ = now + updateSecs_;
+    backoffMult_ = 1;
+    return makeEmptyModel(now, now);
+  }
+
   bool usedTop = false;
   JsonObject siri = getSiriRoot(doc, usedTop);
   if (usedTop) DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: using top-level as Siri container"));
@@ -548,12 +575,10 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   if (siri.isNull()) {
     releaseJsonDoc(docPtr, fromPool);
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: missing Siri root"));
-    long delay = (long)updateSecs_ * (long)backoffMult_;
-    DEBUG_PRINTF("DepartStrip: SiriSource::fetch: scheduling backoff x%u %s for %lds (bad JSON shape)\n",
-                 (unsigned)backoffMult_, sourceKey().c_str(), delay);
-    nextFetch_ = now + delay;
-    if (backoffMult_ < 16) backoffMult_ *= 2;
-    return nullptr;
+    nextFetch_ = now + updateSecs_;
+    backoffMult_ = 1;
+    DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: assuming empty departures"));
+    return makeEmptyModel(now, now);
   }
 
   std::unique_ptr<DepartModel> model;

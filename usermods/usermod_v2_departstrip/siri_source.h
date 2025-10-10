@@ -61,6 +61,7 @@ private:
   size_t computeJsonCapacity(int contentLen);
   JsonObject getSiriRoot(JsonDocument& doc, bool& usedTopLevelFallback);
   bool buildModelFromSiri(JsonObject siri, std::time_t now, std::unique_ptr<DepartModel>& outModel);
+  std::unique_ptr<DepartModel> makeEmptyModel(std::time_t apiTs, std::time_t now) const;
   static JsonDocument* acquireJsonDoc(size_t capacity, bool& fromPool);
   static void releaseJsonDoc(JsonDocument* doc, bool fromPool);
   void endHttp();
