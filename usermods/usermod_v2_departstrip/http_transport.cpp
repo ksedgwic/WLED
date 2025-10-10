@@ -45,19 +45,20 @@ WiFiClient* HttpTransport::begin(const String& url, uint32_t timeoutMs, bool& us
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
   if (isHttps) {
     usedSecure = true;
-    bool needReset = !clientSecure_.connected();
-    if (haveEndpoint) {
-      if (!secureHost_.length() || host != secureHost_ || port != securePort_) {
-        needReset = true;
-      }
-    }
-    if (needReset) {
-      clientSecure_.stop();
-      clientSecure_ = WiFiClientSecure();
+    if (!secureConfigured_) {
       clientSecure_.setInsecure();
       clientSecure_.setNoDelay(true);
-      secureHost_ = haveEndpoint ? host : String();
-      securePort_ = haveEndpoint ? port : 0;
+      secureConfigured_ = true;
+    }
+    if (haveEndpoint) {
+      if (!secureHost_.length() || host != secureHost_ || port != securePort_) {
+        if (clientSecure_.connected()) clientSecure_.stop();
+        secureHost_ = host;
+        securePort_ = port;
+      }
+    } else {
+      secureHost_.clear();
+      securePort_ = 0;
     }
     clientSecure_.setTimeout(timeoutMs);
     clientSecure_.setNoDelay(true);
@@ -93,7 +94,6 @@ void HttpTransport::end(bool usedSecure) {
   if (usedSecure) {
     if (!clientSecure_.connected()) {
       clientSecure_.stop();
-      clientSecure_ = WiFiClientSecure();
       secureHost_.clear();
       securePort_ = 0;
     }
