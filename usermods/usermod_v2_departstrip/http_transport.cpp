@@ -29,6 +29,19 @@ bool parseEndpoint(const String& url, bool isHttps, String& hostOut, uint16_t& p
   if (!hostOut.length()) return false;
   return true;
 }
+
+void drainClientStream(WiFiClient& client) {
+  uint8_t scratch[256];
+  int guard = 0;
+  while (client.available() > 0 && guard < 64) {
+    size_t toRead = client.available();
+    if (toRead > sizeof(scratch)) toRead = sizeof(scratch);
+    size_t got = client.read(scratch, toRead);
+    if (got == 0) break;
+    ++guard;
+    delay(0); // yield
+  }
+}
 } // namespace
 
 namespace departstrip {
@@ -58,6 +71,8 @@ WiFiClient* HttpTransport::begin(const String& url, uint32_t timeoutMs, bool& us
       clientSecure_.setNoDelay(true);
       secureHost_ = haveEndpoint ? host : String();
       securePort_ = haveEndpoint ? port : 0;
+    } else {
+      drainClientStream(clientSecure_);
     }
     clientSecure_.setTimeout(timeoutMs);
     clientSecure_.setNoDelay(true);
@@ -82,6 +97,8 @@ WiFiClient* HttpTransport::begin(const String& url, uint32_t timeoutMs, bool& us
     client_.setNoDelay(true);
     clientHost_ = haveEndpoint ? host : String();
     clientPort_ = haveEndpoint ? port : 0;
+  } else {
+    drainClientStream(client_);
   }
   client_.setTimeout(timeoutMs);
   client_.setNoDelay(true);
