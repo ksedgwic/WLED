@@ -1,4 +1,7 @@
 #include "http_transport.h"
+#if defined(ARDUINO_ARCH_ESP32)
+#include "esp_heap_caps.h"
+#endif
 
 namespace {
 bool parseEndpoint(const String& url, bool isHttps, String& hostOut, uint16_t& portOut) {
@@ -41,6 +44,24 @@ WiFiClient* HttpTransport::begin(const String& url, uint32_t timeoutMs, bool& us
   String host;
   uint16_t port = isHttps ? 443 : 80;
   bool haveEndpoint = parseEndpoint(url, isHttps, host, port);
+
+#if defined(WLED_DEBUG)
+  size_t largest = 0;
+  size_t freeHeap = 0;
+#if defined(ARDUINO_ARCH_ESP32)
+  largest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+  freeHeap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+#else
+  largest = ESP.getMaxAllocHeap();
+  freeHeap = ESP.getFreeHeap();
+#endif
+  DEBUG_PRINTF("DepartStrip: HttpTransport::begin: %s host=%s port=%u largest=%u free=%u\n",
+               isHttps ? "https" : "http",
+               haveEndpoint ? host.c_str() : "(unknown)",
+               (unsigned)port,
+               (unsigned)largest,
+               (unsigned)freeHeap);
+#endif
 
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
   if (isHttps) {
