@@ -3,8 +3,209 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cctype>
+#include <cstdlib>
 
 namespace {
+static constexpr size_t SIRI_SNIFF_PREFIX = 256;
+
+// Emit a short printable preview of the response payload for debugging.
+static void debugLogPayloadPrefix(const char* data, size_t len, bool truncated) {
+#if defined(WLED_DEBUG)
+  if (!data || len == 0) {
+    DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: payload prefix: <empty>"));
+    return;
+  }
+  String snippet;
+  snippet.reserve(len + 16);
+  for (size_t i = 0; i < len; ++i) {
+    char c = data[i];
+    if (c == '\n') {
+      snippet += F("\\n");
+    } else if (c == '\r') {
+      snippet += F("\\r");
+    } else if (c == '\t') {
+      snippet += F("\\t");
+    } else if (c >= 32 && c <= 126) {
+      snippet += c;
+    } else {
+      snippet += '.';
+    }
+  }
+  DEBUG_PRINTF("DepartStrip: SiriSource::fetch: payload prefix (%u bytes%s): %s\n",
+               (unsigned)len, truncated ? " truncated" : "", snippet.c_str());
+#else
+  (void)data;
+  (void)len;
+  (void)truncated;
+#endif
+}
+
+// Stream that decodes HTTP/1.1 chunked transfer encoding.
+struct ChunkedDecodingStream : public Stream {
+  Stream& in;
+  size_t chunkRemaining = 0;
+  bool finished = false;
+  bool error = false;
+  int peekBuf = -1;
+  size_t dataRead = 0;
+
+  explicit ChunkedDecodingStream(Stream& s) : in(s) {}
+
+  size_t write(uint8_t) override { return 0; }
+  size_t write(const uint8_t*, size_t) override { return 0; }
+  void flush() override { in.flush(); }
+
+  int available() override {
+    if (peekBuf >= 0) return 1;
+    if (finished) return 0;
+    return in.available();
+  }
+
+  int read() override {
+    if (peekBuf >= 0) {
+      int c = peekBuf;
+      peekBuf = -1;
+      return c;
+    }
+    return readNext();
+  }
+
+  int peek() override {
+    if (peekBuf >= 0) return peekBuf;
+    int c = readNext();
+    if (c >= 0) peekBuf = c;
+    return c;
+  }
+
+  size_t readBytes(char* buffer, size_t length) override {
+    size_t n = 0;
+    while (n < length) {
+      int c = read();
+      if (c < 0) break;
+      buffer[n++] = (char)c;
+    }
+    return n;
+  }
+
+  size_t readBytes(uint8_t* buffer, size_t length) override { return readBytes((char*)buffer, length); }
+
+  size_t bytesDecoded() const { return dataRead; }
+
+private:
+  int readByte() {
+    uint8_t b;
+    size_t got = in.readBytes(&b, 1);
+    if (got == 1) return b;
+    return -1;
+  }
+
+  int readNext() {
+    if (finished) return -1;
+    if (!ensureChunk()) return -1;
+    int c = readByte();
+    if (c < 0) {
+      finished = true;
+      error = true;
+      return -1;
+    }
+    if (chunkRemaining == 0) {
+      // Should not happen, but guard anyway
+      return -1;
+    }
+    --chunkRemaining;
+    ++dataRead;
+    if (chunkRemaining == 0) {
+      if (!consumeCRLF()) {
+        finished = true;
+        error = true;
+      }
+    }
+    return c;
+  }
+
+  bool ensureChunk() {
+    while (chunkRemaining == 0) {
+      if (finished) return false;
+      if (!readChunkHeader()) {
+        finished = true;
+        return false;
+      }
+      if (finished) return false;
+    }
+    return true;
+  }
+
+  bool readChunkHeader() {
+    char line[64];
+    size_t len = 0;
+    if (!readLine(line, sizeof(line), len)) {
+      error = true;
+      return false;
+    }
+    char* start = line;
+    while (*start && isspace((unsigned char)*start)) ++start;
+    char* semi = strchr(start, ';');
+    if (semi) *semi = '\0';
+    if (*start == '\0') {
+      error = true;
+      return false;
+    }
+    char* endptr = nullptr;
+    unsigned long chunk = strtoul(start, &endptr, 16);
+    if (endptr == start) {
+      error = true;
+      return false;
+    }
+    chunkRemaining = (size_t)chunk;
+    if (chunkRemaining == 0) {
+      consumeTrailers();
+      finished = true;
+      return false;
+    }
+    return true;
+  }
+
+  bool readLine(char* out, size_t cap, size_t& outLen) {
+    outLen = 0;
+    while (true) {
+      int c = readByte();
+      if (c < 0) return false;
+      if (c == '\n') break;
+      if (c != '\r') {
+        if (outLen + 1 < cap) out[outLen++] = (char)c;
+      }
+    }
+    out[outLen] = '\0';
+    return true;
+  }
+
+  bool consumeCRLF() {
+    uint8_t buf[2];
+    if (in.readBytes(buf, 2) != 2) {
+      error = true;
+      return false;
+    }
+    if (buf[0] != '\r' || buf[1] != '\n') {
+      error = true;
+      return false;
+    }
+    return true;
+  }
+
+  void consumeTrailers() {
+    char line[64];
+    size_t len = 0;
+    while (true) {
+      if (!readLine(line, sizeof(line), len)) {
+        error = true;
+        break;
+      }
+      if (len == 0) break;
+    }
+  }
+};
+
 // Stream wrapper that discards a leading UTF-8 BOM if present, then passes through bytes unchanged.
 struct SkipBOMStream : public Stream {
   Stream& in;
@@ -13,10 +214,23 @@ struct SkipBOMStream : public Stream {
   size_t headLen = 0;
   size_t headPos = 0;
   size_t rawRead = 0;
-  explicit SkipBOMStream(Stream& s) : in(s) {}
+  char* sniffBuf = nullptr;
+  size_t sniffCap = 0;
+  size_t sniffLen = 0;
+  bool sniffOverflow = false;
+  explicit SkipBOMStream(Stream& s, char* sniff = nullptr, size_t sniffCapBytes = 0)
+      : in(s), sniffBuf(sniff), sniffCap(sniffCapBytes) {}
   // Satisfy Print's pure virtuals
   size_t write(uint8_t) override { return 0; }
   size_t write(const uint8_t*, size_t) override { return 0; }
+  void sniff(uint8_t b) {
+    if (!sniffBuf || sniffCap == 0) return;
+    if (sniffLen < sniffCap) {
+      sniffBuf[sniffLen++] = (char)b;
+    } else {
+      sniffOverflow = true;
+    }
+  }
   void ensureInit() {
     if (init) return;
     init = true;
@@ -36,9 +250,16 @@ struct SkipBOMStream : public Stream {
   }
   int read() override {
     ensureInit();
-    if (headPos < headLen) return head[headPos++];
+    if (headPos < headLen) {
+      uint8_t b = head[headPos++];
+      sniff(b);
+      return b;
+    }
     int v = in.read();
-    if (v >= 0) ++rawRead;
+    if (v >= 0) {
+      ++rawRead;
+      sniff((uint8_t)v);
+    }
     return v;
   }
   int peek() override {
@@ -50,10 +271,22 @@ struct SkipBOMStream : public Stream {
   size_t readBytes(char* buffer, size_t length) override {
     ensureInit();
     size_t n = 0;
-    while (n < length && headPos < headLen) buffer[n++] = head[headPos++];
+    while (n < length && headPos < headLen) {
+      uint8_t b = head[headPos++];
+      buffer[n++] = b;
+      sniff(b);
+    }
     if (n < length) {
       size_t got = in.readBytes(buffer + n, length - n);
       rawRead += got;
+      if (got > 0) {
+        size_t canStore = (sniffCap > sniffLen) ? std::min(sniffCap - sniffLen, got) : (size_t)0;
+        if (canStore > 0) {
+          memcpy(sniffBuf + sniffLen, buffer + n, canStore);
+          sniffLen += canStore;
+        }
+        if (got > canStore) sniffOverflow = true;
+      }
       n += got;
     }
     return n;
@@ -61,6 +294,8 @@ struct SkipBOMStream : public Stream {
   size_t readBytes(uint8_t* buffer, size_t length) { return readBytes((char*)buffer, length); }
   using Stream::readBytes;
   size_t bytesConsumed() const { return rawRead; }
+  size_t sniffedLength() const { return sniffLen; }
+  bool sniffTruncated() const { return sniffOverflow; }
 };
 
 // Extract the first meaningful string from an ArduinoJson variant that might be
@@ -223,8 +458,16 @@ bool SiriSource::httpBegin(const String& url, int& outLen) {
   return true;
 }
 
-bool SiriSource::parseJsonFromHttp(JsonDocument& doc) {
-  SkipBOMStream s(http_.getStream());
+bool SiriSource::parseJsonFromHttp(JsonDocument& doc,
+                                   bool chunked,
+                                   char* sniffBuf,
+                                   size_t sniffCap,
+                                   size_t* sniffLenOut,
+                                   bool* sniffTruncatedOut) {
+  Stream& base = http_.getStream();
+  ChunkedDecodingStream chunkStream(base);
+  Stream& source = chunked ? static_cast<Stream&>(chunkStream) : base;
+  SkipBOMStream s(source, sniffBuf, sniffCap);
   DeserializationError err;
   // Always apply the narrow filter
   static StaticJsonDocument<4096> filter;
@@ -262,6 +505,8 @@ bool SiriSource::parseJsonFromHttp(JsonDocument& doc) {
   err = deserializeJson(doc, s,
                         DeserializationOption::Filter(filter),
                         DeserializationOption::NestingLimit(80));
+  if (sniffLenOut) *sniffLenOut = s.sniffedLength();
+  if (sniffTruncatedOut) *sniffTruncatedOut = s.sniffTruncated();
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: after parse, consumed=%u, memUsage=%u, free heap=%u\n",
                (unsigned)s.bytesConsumed(), (unsigned)doc.memoryUsage(), ESP.getFreeHeap());
   if (err) {
@@ -515,7 +760,22 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   }
   JsonDocument& doc = *docPtr;
   DEBUG_PRINTF("DepartStrip: SiriSource::fetch: filter=on (len=%d)\n", len);
-  bool parsed = parseJsonFromHttp(doc);
+  String respTransfer = http_.header("Transfer-Encoding");
+  bool isChunked = respTransfer.length() > 0 && respTransfer.equalsIgnoreCase("chunked");
+#if defined(WLED_DEBUG)
+  String respEnc = http_.header("Content-Encoding");
+  String respType = http_.header("Content-Type");
+  String respContentLen = http_.header("Content-Length");
+#endif
+  bool parsed = false;
+#if defined(WLED_DEBUG)
+  char sniffBuf[SIRI_SNIFF_PREFIX] = {0};
+  size_t sniffLen = 0;
+  bool sniffTruncated = false;
+  parsed = parseJsonFromHttp(doc, isChunked, sniffBuf, sizeof(sniffBuf), &sniffLen, &sniffTruncated);
+#else
+  parsed = parseJsonFromHttp(doc, isChunked);
+#endif
   endHttp();
   if (!parsed) {
     if (lastJsonCapacity_ < SIRI_JSON_MAX_CAP) {
@@ -524,6 +784,12 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
       if (bumped > lastJsonCapacity_) lastJsonCapacity_ = bumped;
     }
     releaseJsonDoc(docPtr, fromPool);
+#if defined(WLED_DEBUG)
+    debugLogPayloadPrefix(sniffBuf, sniffLen, sniffTruncated);
+    DEBUG_PRINTF("DepartStrip: SiriSource::fetch: response headers: enc='%s' type='%s' len=%d contentLength='%s' transfer='%s'\n",
+                 respEnc.c_str(), respType.c_str(), len,
+                 respContentLen.c_str(), respTransfer.c_str());
+#endif
     long delay = (long)updateSecs_ * (long)backoffMult_;
     DEBUG_PRINTF("DepartStrip: SiriSource::fetch: scheduling backoff x%u %s for %lds (parse error)\n",
                  (unsigned)backoffMult_, sourceKey().c_str(), delay);
@@ -547,6 +813,12 @@ std::unique_ptr<DepartModel> SiriSource::fetch(std::time_t now) {
   }
   if (siri.isNull()) {
     releaseJsonDoc(docPtr, fromPool);
+#if defined(WLED_DEBUG)
+    debugLogPayloadPrefix(sniffBuf, sniffLen, sniffTruncated);
+    DEBUG_PRINTF("DepartStrip: SiriSource::fetch: response headers: enc='%s' type='%s' len=%d contentLength='%s' transfer='%s'\n",
+                 respEnc.c_str(), respType.c_str(), len,
+                 respContentLen.c_str(), respTransfer.c_str());
+#endif
     DEBUG_PRINTLN(F("DepartStrip: SiriSource::fetch: missing Siri root"));
     long delay = (long)updateSecs_ * (long)backoffMult_;
     DEBUG_PRINTF("DepartStrip: SiriSource::fetch: scheduling backoff x%u %s for %lds (bad JSON shape)\n",
