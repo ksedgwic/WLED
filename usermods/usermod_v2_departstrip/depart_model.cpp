@@ -116,16 +116,16 @@ namespace {
     {"AC", "851",  0x496F80, false},
 
     // Metro-North Railroad core line
-    {"MNR", "1",          0x009B3A, false}, // Hudson Line
+    {"MNR", "1",         0x009B3A, false}, // Hudson Line
 
     // MTA Express buses (Bronx) — warm colors
-    {"MTA", "BC_BXM1",   0xEF6C00, false}, // vivid orange
-    {"MTA", "BC_BXM2",   0xFBC02D, false}, // bright golden yellow
-    {"MTA", "BC_BXM18",  0xB71C1C, false}, // deep red to distinguish the special route
+    {"MTA", "BC_BXM1",   0xD4A628, false}, // saturated golden yellow
+    {"MTA", "BC_BXM2",   0xA14444, false}, // warm red
+    {"MTA", "BC_BXM18",  0x6B4FB7, false}, // richer purple to stand out from buses
 
     // MTA Local buses (Bronx) — cool colors
-    {"MTA", "NYCT_BX10", 0x1E88E5, false}, // blue
-    {"MTA", "NYCT_BX20", 0x5E35B1, false}, // indigo
+    {"MTA", "NYCT_BX10", 0x4E80B8, false}, // blue
+    {"MTA", "NYCT_BX20", 0x1010AE, false}, // punchier blue-green accent
 
     // Metra UP-N line (Chicago)
     {"UPN", "UP-N", 0x00843D, false},
