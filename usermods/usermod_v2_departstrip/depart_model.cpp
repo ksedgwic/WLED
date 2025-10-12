@@ -116,7 +116,7 @@ namespace {
     {"AC", "851",  0x496F80, false},
 
     // Metro-North Railroad core line
-    {"MNR", "1",         0x009B3A, false}, // Hudson Line
+    {"MNR", "1",         0x009B3A, false}, // Hudson Line brand green
 
     // MTA Express buses (Bronx) — warm colors
     {"MTA", "BC_BXM1",   0xD4A628, false}, // saturated golden yellow
@@ -125,10 +125,12 @@ namespace {
 
     // MTA Local buses (Bronx) — cool colors
     {"MTA", "NYCT_BX10", 0x4E80B8, false}, // blue
-    {"MTA", "NYCT_BX20", 0x1010AE, false}, // punchier blue-green accent
+    {"MTA", "NYCT_BX20", 0x1010AE, false}, // deep cobalt-blue; customize suffix variants separately
 
-    // Metra UP-N line (Chicago)
-    {"UPN", "UP-N", 0x00843D, false},
+    // Metra UP-N line (Chicago) — core plus DepartStrip variants
+    {"UPN", "UP-N-Local",   0xF2D34C, false}, // vibrant yellow for Central->Main locals
+    {"UPN", "UP-N-Express", 0x5A3BCB, false}, // richer Northwestern purple for Central->OTC express
+    {"UPN", "UP-N-Davis",   0x1FA57A, false}, // more saturated UP-N green for Wilmette->OTC via Davis
   };
 
   String lineTokenForDefault(const String& agency, const String& lineRef) {
@@ -171,7 +173,9 @@ namespace {
         int dash = candidate.indexOf('-');
         if (dash > 0) candidate = candidate.substring(0, dash);
       }
-      if (candidate == entry.line) {
+      String entryLine(entry.line);
+      entryLine.toUpperCase();
+      if (candidate == entryLine) {
         rgbOut = entry.color;
         return true;
       }
