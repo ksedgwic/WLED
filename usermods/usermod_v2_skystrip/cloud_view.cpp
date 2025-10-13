@@ -8,6 +8,7 @@
 
 static constexpr int16_t DEFAULT_SEG_ID = -1; // -1 means disabled
 const char CFG_SEG_ID[] PROGMEM = "SegmentId";
+const char CFG_RAIN_MAX[] PROGMEM = "RainMaxInHr";
 
 static bool isDay(const SkyModel &m, time_t t) {
   const time_t MAXTT = std::numeric_limits<time_t>::max();
@@ -29,7 +30,7 @@ static bool isDay(const SkyModel &m, time_t t) {
   return t >= sr && t < ss;
 }
 
-CloudView::CloudView() : segId_(DEFAULT_SEG_ID) {
+CloudView::CloudView() : segId_(DEFAULT_SEG_ID), precipMaxInHr_(CloudView::DEFAULT_RAIN_MAX_INPH) {
   DEBUG_PRINTLN("SkyStrip: CV::CTOR");
   snprintf(debugPixelString, sizeof(debugPixelString), "%s:\\n",
            name().c_str());
@@ -153,28 +154,38 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
       constexpr float kHueSnow = 285.f; // lavender for snow
       constexpr float kSatSnow = 0.35f; // pastel-ish (tune to taste)
 
-      float ph, ps, pv;
-      const float satRain = kSatRainMin + (kSatRainMax - kSatRainMin) * precip01;
+      float popScaled =
+          skystrip::util::clamp01((precip01 - 0.10f) / 0.90f); // maps 10%->0, 100%->1
+      float satRain =
+          kSatRainMin + (kSatRainMax - kSatRainMin) * popScaled;
+
+      float rateMax = precipMaxInHr_;
+      if (rateMax <= 0.0f)
+        rateMax = CloudView::DEFAULT_RAIN_MAX_INPH;
+      float rateNorm = (rateMax > 0.0f) ? (precipRateIn / rateMax) : 0.0f;
+      rateNorm = skystrip::util::clamp01(rateNorm);
+
+      // Gentle curve so 0.1-0.5 in/hr remain distinguishable.
+      float rateCurve = sqrtf(rateNorm);
+      float valFromRate = 0.40f + 0.60f * rateCurve;
+      valFromRate = skystrip::util::clamp01(valFromRate);
+
       if (p == 1 || p == 0) {
         // rain (or unspecified → default to rain treatment)
-        ph = kHueRain;
-        ps = satRain;
-        pv = 0.30f + 0.70f * precip01;
+        hue = kHueRain;
+        sat = satRain;
+        val = valFromRate;
       } else if (p == 2) {
         // snow → lavender
-        ph = kHueSnow;
-        ps = kSatSnow;
-        pv = 0.3f + 0.7f * precip01; // keep gentle floor so snow is visible
+        hue = kHueSnow;
+        sat = kSatSnow;
+        val = valFromRate;
       } else {
         // mixed → halfway between blue and lavender
-        ph = 0.5f * (kHueRain + kHueSnow); // ~247.5° (indigo-ish)
-        ps = 0.5f * (satRain + kSatSnow); // blended saturation
-        pv = 0.3f + 0.7f * precip01;
+        hue = 0.5f * (kHueRain + kHueSnow); // ~247.5° (indigo-ish)
+        sat = 0.5f * (satRain + kSatSnow);  // blended saturation
+        val = valFromRate;
       }
-
-      hue = ph;
-      sat = ps;
-      val = skystrip::util::clamp01(pv);
     } else {
       // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
@@ -217,6 +228,7 @@ void CloudView::deactivate() {
 
 void CloudView::addToConfig(JsonObject &subtree) {
   subtree[FPSTR(CFG_SEG_ID)] = segId_;
+  subtree[FPSTR(CFG_RAIN_MAX)] = precipMaxInHr_;
 }
 
 void CloudView::appendConfigData(Print &s) {
@@ -231,5 +243,7 @@ bool CloudView::readFromConfig(JsonObject &subtree, bool startup_complete,
   bool configComplete = !subtree.isNull();
   configComplete &=
       getJsonValue(subtree[FPSTR(CFG_SEG_ID)], segId_, DEFAULT_SEG_ID);
+  configComplete &=
+      getJsonValue(subtree[FPSTR(CFG_RAIN_MAX)], precipMaxInHr_, CloudView::DEFAULT_RAIN_MAX_INPH);
   return configComplete;
 }
