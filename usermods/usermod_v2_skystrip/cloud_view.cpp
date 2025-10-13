@@ -132,7 +132,6 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
     float clouds01 = skystrip::util::clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
     bool daytime = isDay(model, t);
-    
 
     float hue = 0.f, sat = 0.f, val = 0.f;
     if (isMarker(t)) {
@@ -187,7 +186,7 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
 
     uint32_t col = skystrip::util::hsv2rgb(hue, sat, val);
     seg.setPixelColor(i, skystrip::util::blinkDebug(i, dbgPixelIndex, col));
-  
+
     if (dbgPixelIndex >= 0) {
       static time_t lastDebug = 0;
       if (now - lastDebug > 1 && i == dbgPixelIndex) {
