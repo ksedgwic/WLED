@@ -132,6 +132,7 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
     float clouds01 = skystrip::util::clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
     bool daytime = isDay(model, t);
+    float precip01 = skystrip::util::clamp01(float(precipProb));
 
     float hue = 0.f, sat = 0.f, val = 0.f;
     if (isMarker(t)) {
@@ -139,35 +140,38 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
       hue = kMarkerHue;
       sat = kMarkerSat;
       val = kMarkerVal;
-    } else if (p != 0 && precipProb > 0.0) {
+    } else if (precip01 >= 0.10f) {
       // precipitation has next priority: rain=blue, snow=lavender,
       // mixed=indigo-ish blend
-      constexpr float kHueRain = 210.f; // deep blue
-      constexpr float kSatRain = 1.00f;
+      constexpr float kHueRain = 210.f;   // deep blue
+      constexpr float kSatRainMin = 0.20f;
+      constexpr float kSatRainMax = 1.00f;
 
       constexpr float kHueSnow = 285.f; // lavender for snow
       constexpr float kSatSnow = 0.35f; // pastel-ish (tune to taste)
 
-      float ph, ps;
-      if (p == 1) {
-        // rain
+      float ph, ps, pv;
+      const float satRain = kSatRainMin + (kSatRainMax - kSatRainMin) * precip01;
+      if (p == 1 || p == 0) {
+        // rain (or unspecified → default to rain treatment)
         ph = kHueRain;
-        ps = kSatRain;
+        ps = satRain;
+        pv = 0.30f + 0.70f * precip01;
       } else if (p == 2) {
         // snow → lavender
         ph = kHueSnow;
         ps = kSatSnow;
+        pv = 0.3f + 0.7f * precip01; // keep gentle floor so snow is visible
       } else {
         // mixed → halfway between blue and lavender
         ph = 0.5f * (kHueRain + kHueSnow); // ~247.5° (indigo-ish)
-        ps = 0.5f * (kSatRain + kSatSnow); // ~0.675
+        ps = 0.5f * (satRain + kSatSnow); // blended saturation
+        pv = 0.3f + 0.7f * precip01;
       }
 
-      float pv = skystrip::util::clamp01(float(precipProb));
-      pv = 0.3f + 0.7f * pv; // brightness ramp
       hue = ph;
       sat = ps;
-      val = pv;
+      val = skystrip::util::clamp01(pv);
     } else {
       // finally show daytime or nightime clouds
       if (clouds01 < kCloudMaskThreshold) {
