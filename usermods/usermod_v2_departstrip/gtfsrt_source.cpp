@@ -687,18 +687,28 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
 
   size_t added = 0;
   bool tripAssigned = false;
-  for (size_t idx = 0; idx < accum.matchCount; ++idx) {
-    if (tripAssigned) break;
-    const auto& pending = accum.matches[idx];
+  for (size_t stopOrder = 0; stopOrder < ctx.stops.size() && !tripAssigned; ++stopOrder) {
+    size_t bestIdx = TripAccumulator::kMaxPendingStops;
+    time_t bestDep = 0;
+    for (size_t idx = 0; idx < accum.matchCount; ++idx) {
+      const auto& pending = accum.matches[idx];
+      if (pending.stopIndex != static_cast<int>(stopOrder)) continue;
+      if (!destinationSatisfied(pending)) continue;
+      if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
+      time_t dep = clampToTimeT(pending.epoch);
+      if (dep == 0) continue;
+      if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
+      if (bestIdx == TripAccumulator::kMaxPendingStops || dep < bestDep) {
+        bestIdx = idx;
+        bestDep = dep;
+      }
+    }
+    if (bestIdx == TripAccumulator::kMaxPendingStops) continue;
     if ((added & 0x3) == 0) yield();
-    if (pending.stopIndex < 0 || (size_t)pending.stopIndex >= ctx.stops.size()) continue;
-    auto& stopCtx = ctx.stops[pending.stopIndex];
-    if (!destinationSatisfied(pending)) continue;
-    time_t dep = clampToTimeT(pending.epoch);
-    if (dep == 0) continue;
-    if (ctx.now > 0 && dep + 3600 < ctx.now) continue;
+    const auto& pending = accum.matches[bestIdx];
+    auto& stopCtx = ctx.stops[stopOrder];
     DepartModel::Entry::Item item;
-    item.estDep = dep;
+    item.estDep = bestDep;
     item.lineRef = departstrip::util::formatLineLabel(ctx.agency, lineRef);
     if (stopCtx.labelSuffix.length() > 0) {
       item.lineRef += '-';
