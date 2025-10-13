@@ -121,18 +121,21 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
 
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
-    double clouds, precipTypeVal, precipProb;
+    double clouds, precipTypeVal, precipProb, precipRate;
     if (!skystrip::util::estimateCloudAt(model, t, step, clouds))
       continue;
     if (!skystrip::util::estimatePrecipTypeAt(model, t, step, precipTypeVal))
       precipTypeVal = 0.0;
     if (!skystrip::util::estimatePrecipProbAt(model, t, step, precipProb))
       precipProb = 0.0;
+    if (!skystrip::util::estimatePrecipRateAt(model, t, step, precipRate))
+      precipRate = 0.0;
 
     float clouds01 = skystrip::util::clamp01(float(clouds / 100.0));
     int p = int(std::round(precipTypeVal));
     bool daytime = isDay(model, t);
     float precip01 = skystrip::util::clamp01(float(precipProb));
+    float precipRateIn = float(precipRate);
 
     float hue = 0.f, sat = 0.f, val = 0.f;
     if (isMarker(t)) {
@@ -199,9 +202,9 @@ void CloudView::view(time_t now, SkyModel const &model, int16_t dbgPixelIndex) {
         char dbgbuf[20];
         skystrip::util::fmt_local(dbgbuf, sizeof(dbgbuf), t);
         snprintf(debugPixelString, sizeof(debugPixelString),
-                 "%s: nowtm=%s dbgndx=%d dbgtm=%s day=%d clouds01=%.2f precip=%d pop=%.2f H=%.0f S=%.0f V=%.0f\\n",
+                 "%s: nowtm=%s dbgndx=%d dbgtm=%s day=%d clouds01=%.2f precip=%d pop=%.2f acc=%.2fin/hr H=%.0f S=%.0f V=%.0f\\n",
                  name().c_str(), nowbuf, i, dbgbuf, daytime, clouds01, p,
-                 precipProb, hue, sat * 100, val * 100);
+                 precipProb, precipRateIn, hue, sat * 100, val * 100);
         lastDebug = now;
       }
     }
