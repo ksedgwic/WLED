@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""
+Builds a two-page, half-letter explainer for a given installation name.
+
+Usage:
+    python3 common/build.py <install_name>
+
+Reads:
+    installs/<install_name>/legend.json  (per-install lines/colors)
+    common/faq.md                        (shared FAQ; optional — falls back to defaults)
+    common/template.html                 (shared HTML with placeholders)
+
+Writes:
+    installs/<install_name>/explainer.html
+
+No external dependencies (stdlib only).
+"""
+from __future__ import annotations
+import sys
+import json
+import re
+from pathlib import Path
+from datetime import date
+
+ROOT = Path(__file__).resolve().parents[1]
+COMMON = ROOT / "common"
+INSTALLS = ROOT / "installs"
+
+TEMPLATE_PLACEHOLDERS = {
+    "legend": "{{LEGEND_ITEMS}}",
+    "faq": "{{FAQ_BLOCKS}}",
+    "title": "{{TITLE}}",
+    "subtitle": "{{SUBTITLE}}",
+    "updated": "{{UPDATED}}",
+}
+
+DEFAULT_TITLE = "DepartStrip — Legend"
+DEFAULT_SUBTITLE = "Arrivals at a glance"
+
+DEFAULT_FAQ_MD = """
+### What am I looking at?
+Each LED represents a scheduled arrival. Colors map to the legend. Dots move right as arrival time approaches.
+
+### How recent is the data?
+Continuously updated from official GTFS-Realtime/agency sources. If a feed drops, we fall back to last known schedule.
+
+### What do blinking or dim lights mean?
+Blinking = status change (delay/new estimate). Dimmer = farther out in time; brighter = imminent.
+
+### Can I change which lines are shown?
+Yes—use the config file or app to enable/disable routes and tweak colors.
+""".strip()
+
+FAQ_H3 = re.compile(r"^###\s+(.+)$", re.M)
+
+
+def parse_faq(md_text: str) -> list[tuple[str, str]]:
+    """Return list of (question, answer_html) parsed from markdown with H3 questions.
+    Very light parser: groups paragraphs until next H3.
+    """
+    items: list[tuple[str, str]] = []
+    positions = list(FAQ_H3.finditer(md_text))
+    if not positions:
+        md_text = DEFAULT_FAQ_MD
+        positions = list(FAQ_H3.finditer(md_text))
+
+    for i, m in enumerate(positions):
+        q = m.group(1).strip()
+        start = m.end()
+        end = positions[i + 1].start() if i + 1 < len(positions) else len(md_text)
+        body = md_text[start:end].strip()
+        # Convert bare newlines to <br> within paragraphs, and blank lines to paragraph breaks
+        paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+        html_paras = []
+        for p in paras:
+            inner = re.sub(r"\n+", "<br>", p)
+            html_paras.append(f"<p>{inner}</p>")
+        a_html = "\n".join(html_paras) if html_paras else "<p></p>"
+        items.append((q, a_html))
+    return items
+
+
+def load_legend(legend_path: Path) -> dict:
+    with legend_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    # Basic validation
+    if "lines" not in data or not isinstance(data["lines"], list):
+        raise ValueError(f"Missing 'lines' list in {legend_path}")
+    return data
+
+
+def render_legend_items(lines: list[dict]) -> str:
+    buf = []
+    for item in lines:
+        label = item.get("label", "")
+        desc = item.get("desc", "")
+        hex_color = item.get("hex", "#000000")
+        buf.append(
+            f"""
+      <div class="legend-item" role="listitem">
+        <div class="swatch" style="background:{hex_color}"></div>
+        <div>
+          <div class="label">{label}</div>
+          <div class="desc">{desc}</div>
+        </div>
+      </div>"""
+        )
+    return "\n".join(buf)
+
+
+def render_faq_blocks(items: list[tuple[str, str]]) -> str:
+    buf = []
+    for q, a_html in items:
+        buf.append(
+            f"""
+      <div class="qa">
+        <div class="q">{q}</div>
+        <div class="a">{a_html}</div>
+      </div>"""
+        )
+    return "\n".join(buf)
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Usage: python3 common/build.py <install_name>")
+        return 2
+    name = sys.argv[1]
+
+    legend_path = INSTALLS / name / "legend.json"
+    template_path = COMMON / "template.html"
+    faq_md_path = COMMON / "faq.md"
+
+    if not legend_path.exists():
+        raise SystemExit(f"Missing legend file: {legend_path}")
+    if not template_path.exists():
+        raise SystemExit(f"Missing template: {template_path}")
+
+    legend = load_legend(legend_path)
+    title = legend.get("title", DEFAULT_TITLE)
+    subtitle = legend.get("subtitle", DEFAULT_SUBTITLE)
+
+    faq_md = faq_md_path.read_text(encoding="utf-8") if faq_md_path.exists() else DEFAULT_FAQ_MD
+    faq_items = parse_faq(faq_md)
+
+    template = template_path.read_text(encoding="utf-8")
+    html = template
+    html = html.replace(TEMPLATE_PLACEHOLDERS["legend"], render_legend_items(legend["lines"]))
+    html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], render_faq_blocks(faq_items))
+    html = html.replace(TEMPLATE_PLACEHOLDERS["title"], title)
+    html = html.replace(TEMPLATE_PLACEHOLDERS["subtitle"], subtitle)
+    html = html.replace(TEMPLATE_PLACEHOLDERS["updated"], date.today().isoformat())
+
+    out_path = INSTALLS / name / "explainer.html"
+    out_path.write_text(html, encoding="utf-8")
+    print(f"Wrote {out_path}")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

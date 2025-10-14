@@ -1,0 +1,12 @@
+{
+  "title": "DepartStrip — Legend",
+  "subtitle": "Arrivals at a glance",
+  "lines": [
+    { "label": "MNR • Hudson Line", "desc": "Core line (Hudson) — brand green", "hex": "#009B3A" },
+    { "label": "BxM1 • Express",   "desc": "Saturated golden yellow",            "hex": "#D4A628" },
+    { "label": "BxM2 • Express",   "desc": "Warm red",                             "hex": "#A14444" },
+    { "label": "BxM18 • Express",  "desc": "Richer purple (stands out from locals)", "hex": "#6B4FB7" },
+    { "label": "Bx10 • Local",     "desc": "Cool blue",                            "hex": "#4E80B8" },
+    { "label": "Bx20 • Local",     "desc": "Deep cobalt blue",                     "hex": "#1010AE" }
+  ]
+}
