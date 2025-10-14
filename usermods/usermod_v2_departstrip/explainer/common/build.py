@@ -34,7 +34,7 @@ TEMPLATE_PLACEHOLDERS = {
     "updated": "{{UPDATED}}",
 }
 
-DEFAULT_TITLE = "DepartStrip — Legend"
+DEFAULT_TITLE = "DepartStrip"
 DEFAULT_SUBTITLE = "Arrivals at a glance"
 
 DEFAULT_FAQ_MD = """
@@ -149,7 +149,6 @@ def main() -> int:
     html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], render_faq_blocks(faq_items))
     html = html.replace(TEMPLATE_PLACEHOLDERS["title"], title)
     html = html.replace(TEMPLATE_PLACEHOLDERS["subtitle"], subtitle)
-    html = html.replace(TEMPLATE_PLACEHOLDERS["updated"], date.today().isoformat())
 
     out_path = INSTALLS / name / "explainer.html"
     out_path.write_text(html, encoding="utf-8")
