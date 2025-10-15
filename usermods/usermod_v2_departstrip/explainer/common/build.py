@@ -28,6 +28,7 @@ INSTALLS = ROOT / "installs"
 
 TEMPLATE_PLACEHOLDERS = {
     "legend": "{{LEGEND_ITEMS}}",
+    "groups": "{{LEGEND_GROUPS}}",
     "faq": "{{FAQ_BLOCKS}}",
     "title": "{{TITLE}}",
     "subtitle": "{{SUBTITLE}}",
@@ -108,6 +109,23 @@ def render_legend_items(lines: list[dict]) -> str:
     return "\n".join(buf)
 
 
+def render_legend_groups(groups: list[dict]) -> str:
+    sections = []
+    for group in groups:
+        title = group.get("title", "")
+        lines = group.get("lines", [])
+        sections.append(
+            f"""
+      <section class="legend-group">
+        <h3>{title}</h3>
+        <div class="legend-list" role="list">
+{render_legend_items(lines)}
+        </div>
+      </section>"""
+        )
+    return "\n".join(sections)
+
+
 def render_faq_blocks(items: list[tuple[str, str]]) -> str:
     buf = []
     for q, a_html in items:
@@ -128,24 +146,30 @@ def main() -> int:
     name = sys.argv[1]
 
     legend_path = INSTALLS / name / "legend.json"
-    template_path = COMMON / "template.html"
-    faq_md_path = COMMON / "faq.md"
 
     if not legend_path.exists():
         raise SystemExit(f"Missing legend file: {legend_path}")
-    if not template_path.exists():
-        raise SystemExit(f"Missing template: {template_path}")
 
     legend = load_legend(legend_path)
     title = legend.get("title", DEFAULT_TITLE)
     subtitle = legend.get("subtitle", DEFAULT_SUBTITLE)
 
+    template_name = legend.get("template", "template.html")
+    template_path = COMMON / template_name
+    if not template_path.exists():
+        raise SystemExit(f"Missing template: {template_path}")
+
+    faq_name = legend.get("faq")
+    faq_md_path = COMMON / faq_name if faq_name else COMMON / "faq.md"
     faq_md = faq_md_path.read_text(encoding="utf-8") if faq_md_path.exists() else DEFAULT_FAQ_MD
     faq_items = parse_faq(faq_md)
 
     template = template_path.read_text(encoding="utf-8")
     html = template
-    html = html.replace(TEMPLATE_PLACEHOLDERS["legend"], render_legend_items(legend["lines"]))
+    lines = legend.get("lines", [])
+    html = html.replace(TEMPLATE_PLACEHOLDERS["legend"], render_legend_items(lines))
+    groups = legend.get("groups")
+    html = html.replace(TEMPLATE_PLACEHOLDERS["groups"], render_legend_groups(groups) if groups else "")
     html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], render_faq_blocks(faq_items))
     html = html.replace(TEMPLATE_PLACEHOLDERS["title"], title)
     html = html.replace(TEMPLATE_PLACEHOLDERS["subtitle"], subtitle)

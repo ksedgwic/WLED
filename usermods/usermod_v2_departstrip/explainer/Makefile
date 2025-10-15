@@ -1,6 +1,8 @@
-INSTALLS := spuyten
+INSTALLS := spuyten oakstop
 
 HTMLS := $(INSTALLS:%=installs/%/explainer.html)
+COMMON_TEMPLATES := common/template.html common/template_oakstop.html
+COMMON_FAQS := common/faq.md common/faq_quick.md
 
 .PHONY: all clean FORCE $(INSTALLS:%=build-%) open-%
 
