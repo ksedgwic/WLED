@@ -109,18 +109,30 @@ def render_legend_items(lines: list[dict]) -> str:
     return "\n".join(buf)
 
 
-def render_legend_groups(groups: list[dict]) -> str:
+def render_legend_groups(groups: list[dict], faq_html: str = "") -> str:
     sections = []
     for group in groups:
         title = group.get("title", "")
         lines = group.get("lines", [])
+        classes = "legend-group"
+        group_class = group.get("class")
+        if group_class:
+            classes += " " + group_class
+        extra = ""
+        if group.get("appendFaq") and faq_html:
+            extra = f"""
+        <div class="legend-spacer" aria-hidden="true"></div>
+        <div class="faq faq-inline">
+          <h3>Quick FAQ</h3>
+{faq_html}
+        </div>"""
         sections.append(
             f"""
-      <section class="legend-group">
+      <section class="{classes}">
         <h3>{title}</h3>
         <div class="legend-list" role="list">
 {render_legend_items(lines)}
-        </div>
+        </div>{extra}
       </section>"""
         )
     return "\n".join(sections)
@@ -166,11 +178,19 @@ def main() -> int:
 
     template = template_path.read_text(encoding="utf-8")
     html = template
+    faq_html = render_faq_blocks(faq_items)
     lines = legend.get("lines", [])
+    groups = legend.get("groups", [])
+    if groups:
+        bart = next((g for g in groups if g.get("title") == "BART"), None)
+        ac = next((g for g in groups if g.get("title") == "AC Transit"), None)
+        html = html.replace("{{BART_LEGEND}}", render_legend_groups([bart], faq_html) if bart else "")
+        html = html.replace("{{AC_LEGEND}}", render_legend_groups([ac], "") if ac else "")
+    else:
+        html = html.replace("{{BART_LEGEND}}", "")
+        html = html.replace("{{AC_LEGEND}}", "")
     html = html.replace(TEMPLATE_PLACEHOLDERS["legend"], render_legend_items(lines))
-    groups = legend.get("groups")
-    html = html.replace(TEMPLATE_PLACEHOLDERS["groups"], render_legend_groups(groups) if groups else "")
-    html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], render_faq_blocks(faq_items))
+    html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], faq_html)
     html = html.replace(TEMPLATE_PLACEHOLDERS["title"], title)
     html = html.replace(TEMPLATE_PLACEHOLDERS["subtitle"], subtitle)
 
