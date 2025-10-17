@@ -128,9 +128,8 @@ namespace {
     {"MTA", "NYCT_BX20", 0x1010AE, false}, // deep cobalt-blue; customize suffix variants separately
 
     // Metra UP-N line (Chicago) — core plus DepartStrip variants
-    {"UPN", "UP-N-Local",   0xF2D34C, false}, // vibrant yellow for Central->Main locals
-    {"UPN", "UP-N-Express", 0x5A3BCB, false}, // richer Northwestern purple for Central->OTC express
-    {"UPN", "UP-N-Davis",   0x1FA57A, false}, // more saturated UP-N green for Wilmette->OTC via Davis
+    {"UPN", "UP-N-Central", 0x5A3BCB, false}, // richer Northwestern purple
+    {"UPN", "UP-N-Wilmette",   0x1FA57A, false}, // more saturated UP-N green
   };
 
   String lineTokenForDefault(const String& agency, const String& lineRef) {
