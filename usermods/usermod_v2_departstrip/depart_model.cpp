@@ -107,7 +107,7 @@ namespace {
     {"AC", "51A",  0x806000, false},
     {"AC", "72",   0x00804D, false},
     {"AC", "72M",  0x630080, false},
-    {"AC", "88",   0x808040, false},
+    {"AC", "88",   0x706030, false},
     {"AC", "633",  0x808080, false},
     {"AC", "651",  0x808080, false},
     {"AC", "800",  0x4C8032, false},
