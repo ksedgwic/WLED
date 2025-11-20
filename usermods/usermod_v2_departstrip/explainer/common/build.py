@@ -6,9 +6,9 @@ Usage:
     python3 common/build.py <install_name>
 
 Reads:
-    installs/<install_name>/legend.json  (per-install lines/colors)
+    installs/<install_name>/legend.json  (per-install lines/colors or direction/stops)
     common/faq.md                        (shared FAQ; optional — falls back to defaults)
-    common/template.html                 (shared HTML with placeholders)
+    common/template*.html                (shared HTML with placeholders)
 
 Writes:
     installs/<install_name>/explainer.html
@@ -33,6 +33,7 @@ TEMPLATE_PLACEHOLDERS = {
     "title": "{{TITLE}}",
     "subtitle": "{{SUBTITLE}}",
     "updated": "{{UPDATED}}",
+    "directions": "{{DIRECTIONS}}",
 }
 
 DEFAULT_TITLE = "DepartStrip"
@@ -85,8 +86,14 @@ def load_legend(legend_path: Path) -> dict:
     with legend_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     # Basic validation
-    if "lines" not in data or not isinstance(data["lines"], list):
+    has_lines = "lines" in data
+    has_directions = "directions" in data
+    if not has_lines and not has_directions:
+        raise ValueError(f"Missing 'lines' or 'directions' in {legend_path}")
+    if has_lines and not isinstance(data["lines"], list):
         raise ValueError(f"Missing 'lines' list in {legend_path}")
+    if not has_lines:
+        data["lines"] = []
     return data
 
 
@@ -138,6 +145,65 @@ def render_legend_groups(groups: list[dict], faq_html: str = "") -> str:
     return "\n".join(sections)
 
 
+def render_routes(routes: list[dict]) -> str:
+    buf = []
+    for route in routes:
+        label = route.get("label", "")
+        desc = route.get("desc", "")
+        hex_color = route.get("hex", "#000000")
+        buf.append(
+            f"""
+        <div class="route" role="listitem">
+          <div class="swatch" style="background:{hex_color}"></div>
+          <div class="route-body">
+            <div class="route-label">{label}</div>
+            <div class="route-desc">{desc}</div>
+          </div>
+        </div>"""
+        )
+    return "\n".join(buf)
+
+
+def render_stops(stops: list[dict]) -> str:
+    cards = []
+    for stop in stops:
+        name = stop.get("name", "")
+        stop_id = stop.get("id", "")
+        routes = stop.get("routes", [])
+        cards.append(
+            f"""
+      <article class="stop-card">
+        <div class="stop-header">
+          <div class="stop-name">{name}</div>
+          <div class="stop-id">Stop {stop_id}</div>
+        </div>
+        <div class="route-list" role="list">
+{render_routes(routes)}
+        </div>
+      </article>"""
+        )
+    return "\n".join(cards)
+
+
+def render_directions(directions: list[dict]) -> str:
+    sections = []
+    for direction in directions:
+        title = direction.get("title", "")
+        stops = direction.get("stops", [])
+        sections.append(
+            f"""
+    <section class="direction">
+      <div class="direction-heading">
+        <div class="direction-label">{title}</div>
+      </div>
+      <div class="stop-grid" role="list">
+{render_stops(stops)}
+      </div>
+    </section>"""
+        )
+    return "\n".join(sections)
+
+
 def render_faq_blocks(items: list[tuple[str, str]]) -> str:
     buf = []
     for q, a_html in items:
@@ -181,6 +247,7 @@ def main() -> int:
     faq_html = render_faq_blocks(faq_items)
     lines = legend.get("lines", [])
     groups = legend.get("groups", [])
+    directions = legend.get("directions", [])
     if groups:
         bart = next((g for g in groups if g.get("title") == "BART"), None)
         ac = next((g for g in groups if g.get("title") == "AC Transit"), None)
@@ -191,6 +258,7 @@ def main() -> int:
         html = html.replace("{{AC_LEGEND}}", "")
     html = html.replace(TEMPLATE_PLACEHOLDERS["legend"], render_legend_items(lines))
     html = html.replace(TEMPLATE_PLACEHOLDERS["faq"], faq_html)
+    html = html.replace(TEMPLATE_PLACEHOLDERS["directions"], render_directions(directions) if directions else "")
     html = html.replace(TEMPLATE_PLACEHOLDERS["title"], title)
     html = html.replace(TEMPLATE_PLACEHOLDERS["subtitle"], subtitle)
 
