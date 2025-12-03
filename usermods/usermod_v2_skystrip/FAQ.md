@@ -12,9 +12,14 @@ precipitation, hue denotes type—deep blue for rain, lavender for snow,
 and indigo for mixed—while value scales with probability. In the
 absence of precipitation, hue differentiates day from night: daylight
 clouds appear pale yellow, nighttime clouds desaturate toward
-white. For clouds, saturation is low and value grows with coverage,
-keeping even thin clouds visible. Thus, a bright blue pixel highlights
-likely rain, whereas a soft yellow glow marks daytime cloud cover.
+white. Cloud coverage now dithers along forecast time using a
+triangle-wave mask: the central band of each wave lights up, and its
+width matches the cloud fraction. Sparse clouds show as occasional
+dots, roughly half cover alternates on/off bands, and 100% cover stays
+solid. Adjust band spacing with the `CloudWaveHalfPx` setting
+(half-cycle in pixels; default 2.2). Thus, a bright blue pixel highlights
+likely rain, whereas a striped soft yellow glow marks daytime cloud
+cover.
 
 
 ## Wind View (WV)
