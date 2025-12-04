@@ -79,29 +79,23 @@ The actual temperature→hue stops used by the renderer are:
 
 ## 24-Hour Delta View (DV)
 
-Hue represents the temperature change relative to the previous day:
-blues for cooling, greens for steady conditions, and yellows through
-reds for warming. Saturation encodes humidity trend—the color
-intensifies as the air grows drier and fades toward pastels when
-becoming more humid. Value increases with the magnitude of change,
-combining temperature and humidity shifts, so bright pixels flag
-larger swings. A dim blue pixel therefore means a slight cool‑down
-with more moisture, while a bright saturated red indicates rapid
-warming coupled with drying.
+Shows how much warmer or colder it is compared to the same time
+yesterday. Small changes stay dark so quiet days don’t flicker.
+Humidity changes are ignored.
 
-Approximate mapping of day-to-day deltas to color attributes:
+Default thresholds are 5 / 10 / 15 °F (configurable with
+`DeltaThresholds`). Colors run from cold on the left to warm on the
+right, with “no change” in the middle:
 
-| Temperature | Hue (Color) |
-|-------------|-------------|
-| Cooling     | Blue tones  |
-| Steady      | Green       |
-| Warming     | Yellow→Red  |
-
-| Humidity   | Saturation |
-|------------|------------|
-| More humid | Low/Pastel |
-| Stable     | Medium     |
-| Drier      | High/Vivid |
+| Change vs 24h prior  | Strip color | Brightness  |
+|----------------------|-------------|-------------|
+| More than 15° colder | Purple      | Very Strong |
+| 10–15° colder        | Indigo      | Strong      |
+| 5–10° colder         | Cyan-blue   | Medium      |
+| Less than 5° change  | Off (blank) | Off         |
+| 5–10° warmer         | Yellow      | Medium      |
+| 10–15° warmer        | Orange      | Strong      |
+| More than 15° warmer | Red         | Very Strong |
 
 
 ## Test Pattern View (TP)
