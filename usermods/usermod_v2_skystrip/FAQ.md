@@ -53,28 +53,29 @@ Note: Hues wrap at 360°, so “N” repeats at the boundary.
 
 ## Temperature View (TV)
 
-Hue follows a calibrated cold→hot gradient tuned for pleasing segment
-appearance: deep blues near 14 °F transition through cyan and green to
-warm yellows at 77 °F and reds at ~104 °F and above. Saturation
-reflects humidity via dew‑point spread; muggy air produces softer,
-desaturated colors, whereas dry air yields vivid tones. Value is fixed
-at mid‑brightness, but local time markers (e.g., noon, midnight)
-temporarily darken pixels to mark time. A bright orange‑red pixel thus
-signifies hot, dry conditions around 95 °F, whereas a pale cyan pixel
-indicates a cool, humid day near 50 °F.
+Hue comes from a configurable `ColorMap` string of `center:hue` pairs
+separated by `|` (hue is 0–359 degrees or a name: `magenta, purple, blue, cyan, green, yellow, orange, red`). Saturation still tracks dew‑point spread (muggy = desaturated, dry = vivid), value is fixed mid‑brightness, time markers dim pixels briefly at 3‑hour intervals, and hue is linearly interpolated between centers.
 
-The actual temperature→hue stops used by the renderer are:
+Default 15 °F rotation (with short wraps at the ends): `-30:yellow|-15:orange|0:red|15:magenta|30:purple|45:blue|60:cyan|75:green|90:yellow|105:orange|120:red|135:magenta|150:purple|165:blue`. The palette wraps instead of clamping at extremes.
 
-| Temp (°F) | Hue (°) | Color       |
-|-----------|---------|-------------|
-| ≤14       | 234.9   | Deep blue   |
-| 32        | 207.0   | Blue/cyan   |
-| 50        | 180.0   | Cyan        |
-| 68        | 138.8   | Greenish    |
-| 77        | 60.0    | Yellow      |
-| 86        | 38.8    | Orange      |
-| 95        | 18.8    | Orange‑red  |
-| ≥104      | 0.0     | Red         |
+Primary rotation reference:
+
+| Center (°F) | Hue name | Hue (°) |
+|-------------|----------|---------|
+| -30         | yellow   | 60      |
+| -15         | orange   | 30      |
+| 0           | red      | 0       |
+| 15          | magenta  | 300     |
+| 30          | purple   | 275     |
+| 45          | blue     | 220     |
+| 60          | cyan     | 185     |
+| 75          | green    | 130     |
+| 90          | yellow   | 60      |
+| 105         | orange   | 30      |
+| 120         | red      | 0       |
+| 135         | magenta  | 300     |
+| 150         | purple   | 275     |
+| 165         | blue     | 220     |
 
 
 ## 24-Hour Delta View (DV)
