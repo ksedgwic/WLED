@@ -56,26 +56,22 @@ Note: Hues wrap at 360°, so “N” repeats at the boundary.
 Hue comes from a configurable `ColorMap` string of `center:hue` pairs
 separated by `|` (hue is 0–359 degrees or a name: `magenta, purple, blue, cyan, green, yellow, orange, red`). Saturation still tracks dew‑point spread (muggy = desaturated, dry = vivid), value is fixed mid‑brightness, time markers dim pixels briefly at 3‑hour intervals, and hue is linearly interpolated between centers.
 
-Default 15 °F rotation (with short wraps at the ends): `-30:yellow|-15:orange|0:red|15:magenta|30:purple|45:blue|60:cyan|75:green|90:yellow|105:orange|120:red|135:magenta|150:purple|165:blue`. The palette wraps instead of clamping at extremes.
+Default 15 °F rotation (with short wraps at the ends): `-45:yellow|-30:orange|-15:red|0:magenta|15:purple|30:blue|45:cyan|60:green|75:yellow|90:orange|105:red|120:magenta|135:purple|150:blue`. The palette wraps instead of clamping at extremes.
 
 Primary rotation reference:
 
 | Center (°F) | Hue name | Hue (°) |
 |-------------|----------|---------|
-| -30         | yellow   | 60      |
-| -15         | orange   | 30      |
-| 0           | red      | 0       |
-| 15          | magenta  | 300     |
-| 30          | purple   | 275     |
-| 45          | blue     | 220     |
-| 60          | cyan     | 185     |
-| 75          | green    | 130     |
-| 90          | yellow   | 60      |
-| 105         | orange   | 30      |
-| 120         | red      | 0       |
-| 135         | magenta  | 300     |
-| 150         | purple   | 275     |
-| 165         | blue     | 220     |
+| 120         | magenta  | 300     |
+| 105         | red      | 0       |
+| 90          | orange   | 30      |
+| 75          | yellow   | 60      |
+| 60          | green    | 130     |
+| 45          | cyan     | 185     |
+| 30          | blue     | 220     |
+| 15          | purple   | 275     |
+| 0           | magenta  | 300     |
+| -15         | red      | 0       |
 
 
 ## 24-Hour Delta View (DV)

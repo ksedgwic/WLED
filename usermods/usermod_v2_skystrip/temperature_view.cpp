@@ -21,8 +21,8 @@ const char CFG_MOVE_OFFSET[] PROGMEM = "MoveOffset";
 
 // Default map: 15°F centers with short wraps at the ends.
 static constexpr const char kDefaultColorMapStr[] =
-    "-30:yellow|-15:orange|0:red|15:magenta|30:purple|45:blue|60:cyan|"
-    "75:green|90:yellow|105:orange|120:red|135:magenta|150:purple|165:blue";
+    "-45:yellow|-30:orange|-15:red|0:magenta|15:purple|30:blue|45:cyan|"
+    "60:green|75:yellow|90:orange|105:red|120:magenta|135:purple|150:blue";
 
 static constexpr int16_t kCenterMinF = -200;
 static constexpr int16_t kCenterMaxF = 200;
@@ -232,6 +232,60 @@ void TemperatureView::view(time_t now, SkyModel const &model,
   constexpr time_t DAY = 24 * 60 * 60;
   const long tzOffset = skystrip::util::current_offset();
 
+  std::vector<double> temps(len, NAN);
+  std::vector<float> hues(len, 0.f);
+  std::vector<float> sats(len, 1.f);
+  std::vector<uint8_t> valid(len, 0);
+
+  // Precompute temps/hues/sats so we can detect crossings.
+  for (int i = 0; i < len; ++i) {
+    const time_t t = now + time_t(std::llround(step * i));
+    double tempF = 0.f;
+    double dewF = 0.f;
+    if (skystrip::util::estimateTempAt(model, t, step, tempF)) {
+      float hue = hueForTempF(tempF);
+      float sat = 1.0f;
+      if (skystrip::util::estimateDewPtAt(model, t, step, dewF)) {
+        sat = satFromDewSpreadF((float)tempF, (float)dewF);
+      }
+      temps[i] = tempF;
+      hues[i] = hue;
+      sats[i] = sat;
+      valid[i] = 1;
+    }
+  }
+
+  // Mark crossings at 5°F (low boost) and 10°F (full boost) boundaries.
+  std::vector<uint8_t> crossingLevel(len, 0); // 0=none,1=5°F,2=10°F
+  auto markCrossings = [&](double stepDeg, uint8_t level, bool dualHighlight) {
+    for (int i = 0; i + 1 < len; ++i) {
+      if (!valid[i] || !valid[i + 1])
+        continue;
+      double a = temps[i];
+      double b = temps[i + 1];
+      if (a == b)
+        continue;
+      double lo = std::min(a, b);
+      double hi = std::max(a, b);
+      double boundary = std::ceil(lo / stepDeg) * stepDeg;
+      if (boundary > hi)
+        continue;
+      double da = fabs(a - boundary);
+      double db = fabs(b - boundary);
+      int idx = (da <= db) ? i : (i + 1);
+      if (crossingLevel[idx] < level)
+        crossingLevel[idx] = level;
+      if (dualHighlight) {
+        if (crossingLevel[i] < level)
+          crossingLevel[i] = level;
+        if (crossingLevel[i + 1] < level)
+          crossingLevel[i + 1] = level;
+      }
+    }
+  };
+  markCrossings(5.0, 1, false);
+  markCrossings(10.0, 2, true);
+
   // Returns [0,1] marker weight based on proximity to local-time markers.
   // Markers: 12a/12p (double width), plus 3a/3p, 6a/6p, 9a/9p (normal width).
   // Width=1 → fades to 0 at 1 pixel; width=2 → fades to 0 at 2 pixels.
@@ -274,23 +328,28 @@ void TemperatureView::view(time_t now, SkyModel const &model,
   for (int i = 0; i < len; ++i) {
     const time_t t = now + time_t(std::llround(step * i));
 
-    double tempF = 0.f;
-    double dewF = 0.f;
-    float hue = 0.f;
-    float sat = 1.0f;
+    double tempF = temps[i];
+    float hue = hues[i];
+    float sat = sats[i];
     uint32_t col = 0;
-    if (skystrip::util::estimateTempAt(model, t, step, tempF)) {
-      hue = hueForTempF(tempF);
-      if (skystrip::util::estimateDewPtAt(model, t, step, dewF)) {
-        sat = satFromDewSpreadF((float)tempF, (float)dewF);
+    if (valid[i]) {
+      float val = kValue;
+      if (crossingLevel[i] == 2) {
+        sat = 1.0f;
+        val = 0.9f; // strong boost for 10°F crossings
+      } else if (crossingLevel[i] == 1) {
+        sat = 1.0f;
+        val = 0.9f; // lighter boost for 5°F crossings
       }
-      col = skystrip::util::hsv2rgb(hue, sat, kValue);
+      col = skystrip::util::hsv2rgb(hue, sat, val);
     }
 
-    float m = markerWeight(t);
-    if (m > 0.f) {
-      uint8_t blend = uint8_t(std::lround(m * 255.f));
-      col = color_blend(col, 0, blend);
+    if (crossingLevel[i] == 0) {
+      float m = markerWeight(t);
+      if (m > 0.f) {
+        uint8_t blend = uint8_t(std::lround(m * 255.f));
+        col = color_blend(col, 0, blend);
+      }
     }
 
     if (dbgPixelIndex >= 0) {
@@ -304,9 +363,9 @@ void TemperatureView::view(time_t now, SkyModel const &model,
         fmtColorHex(col, colbuf, sizeof(colbuf));
         snprintf(debugPixelString, sizeof(debugPixelString),
                  "%s: nowtm=%s dbgndx=%d dbgtm=%s "
-                 "tempF=%.1f dewF=%.1f hue=%.0f sat=%.0f col=%s\\n",
-                 name().c_str(), nowbuf, i, dbgbuf, tempF, dewF, hue, sat * 100,
-                 colbuf);
+                 "tempF=%.1f hue=%.0f sat=%.0f crossing=%d col=%s\\n",
+                 name().c_str(), nowbuf, i, dbgbuf, tempF, hue, sat * 100,
+                 crossingLevel[i], colbuf);
         lastDebug = now;
       }
     }
