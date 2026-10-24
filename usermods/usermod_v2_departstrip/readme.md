@@ -61,7 +61,19 @@ Source sections (siri_source1, siri_source2, …)
 - AgencyStopCode — `AGENCY:StopCode`. Examples:
   - SIRI: `AC:50958` or `BA:900201`.
   - CTA: `CTA:41050.5` (`mapId.trDr`).
-  - GTFS-RT: `AGENCY:StopId` (token format matches your feed).
+  - GTFS-RT: `AGENCY:StopId` (token format matches your feed). Each
+    stop token may carry up to three qualifiers, in this order:
+    `StopId->DestStopId/ROUTE|ROUTE=label`.
+    - `->DestStopId` keeps only trips that go on to that stop (a
+      direction filter for stops served both ways).
+    - `/ROUTE|ROUTE` keeps only trips on those routes, matched against
+      the feed's `route_id` without the agency prefix, case-insensitive.
+      Leave it off to see every line at the stop; the settings page
+      lists the lines currently matched, so you can add the filter
+      once you know the names. Example: `AC:51067/NL|NX`. The
+      characters `!` and `*` are reserved for later exclude and prefix
+      forms; do not use them in route names.
+    - `=label` appends a suffix to the line name shown for that token.
 
 Top-level DepartStrip settings
 - Enabled — master enable.

@@ -110,6 +110,68 @@ static bool candidateMatches(const CandidateStopId& cand, const StopMatchData& m
   return false;
 }
 
+// Route allow-list from the "/A|B" part of a stop token: trimmed, uppercased,
+// '|'-separated, empty parts dropped.
+static String normalizeRouteList(const String& raw) {
+  String out;
+  int start = 0;
+  int len = raw.length();
+  while (start <= len) {
+    int bar = raw.indexOf('|', start);
+    String part = (bar >= 0) ? raw.substring(start, bar) : raw.substring(start);
+    part.trim();
+    part.toUpperCase();
+    if (part.length() > 0) {
+      if (out.length() > 0) out += '|';
+      out += part;
+    }
+    if (bar < 0) break;
+    start = bar + 1;
+  }
+  return out;
+}
+
+static void splitRouteList(const String& normalized, std::vector<String>& out) {
+  out.clear();
+  int start = 0;
+  int len = normalized.length();
+  while (start < len) {
+    int bar = normalized.indexOf('|', start);
+    out.push_back((bar >= 0) ? normalized.substring(start, bar) : normalized.substring(start));
+    if (bar < 0) break;
+    start = bar + 1;
+  }
+}
+
+// The feed's route_id as it is compared against an allow-list: a leading
+// agency prefix ("AC NL", "AC-NL") is dropped, the rest uppercased.
+static String routeTokenForMatch(const String& agency, const std::string& routeId) {
+  String r(routeId.c_str());
+  r.trim();
+  if (agency.length() > 0) {
+    String rLower = r;
+    rLower.toLowerCase();
+    String agLower = agency;
+    agLower.toLowerCase();
+    if (rLower.startsWith(agLower)) {
+      unsigned pos = agency.length();
+      while (pos < r.length()) {
+        char c = r.charAt(pos);
+        if (c == ' ' || c == '-' || c == '_' || c == ':') { ++pos; continue; }
+        break;
+      }
+      // Only a prefix followed by a separator is an agency prefix ("AC NL");
+      // a route that merely starts with the same letters is left alone.
+      if (pos > agency.length()) {
+        r = r.substring(pos);
+        r.trim();
+      }
+    }
+  }
+  r.toUpperCase();
+  return r;
+}
+
 struct ParseContext {
   struct StopContext {
     String stopCode;                // e.g. "900202"
@@ -117,6 +179,7 @@ struct ParseContext {
     StopMatchData destination;
     bool hasDestination = false;
     String labelSuffix;             // optional suffix appended to lineRef (e.g., "local")
+    std::vector<String> routes;     // optional allow-list of route ids, uppercase, from the "/A|B" token part
     std::vector<DepartModel::Entry::Item> items;
     bool lastStopSeqValid = false;
     uint32_t lastStopSeq = 0;
@@ -162,6 +225,14 @@ struct ParseContext {
           trimmed = trimmed.substring(0, equalsPos);
         }
 
+        // Token grammar: stop[->dest][/ROUTE|ROUTE][=label]
+        String routesToken;
+        int slashPos = trimmed.indexOf('/');
+        if (slashPos >= 0) {
+          routesToken = normalizeRouteList(trimmed.substring(slashPos + 1));
+          trimmed = trimmed.substring(0, slashPos);
+        }
+
         int arrowPos = trimmed.indexOf(F("->"));
         String baseToken = trimmed;
         String destToken;
@@ -185,6 +256,11 @@ struct ParseContext {
           sc.stopCode += destToken;
         } else {
           sc.stopCode = baseToken;
+        }
+        if (routesToken.length() > 0) {
+          sc.stopCode += '/';
+          sc.stopCode += routesToken;
+          splitRouteList(routesToken, sc.routes);
         }
         if (labelToken.length() > 0) {
           sc.stopCode += '=';
@@ -267,10 +343,22 @@ static bool destinationSatisfied(const TripAccumulator::PendingStop& pending) {
   return pending.destinationSatisfied;
 }
 
+// A stop context with a route allow-list takes only trips on those routes.
+static bool routeAllowed(const ParseContext::StopContext& sc, const String& agency, const std::string& routeId) {
+  if (sc.routes.empty()) return true;
+  String r = routeTokenForMatch(agency, routeId);
+  for (const auto& allowed : sc.routes) {
+    if (allowed == r) return true;
+  }
+  return false;
+}
+
 static String extractBaseStopCode(const String& token) {
   String base = token;
   int equalsPos = base.indexOf('=');
   if (equalsPos >= 0) base = base.substring(0, equalsPos);
+  int slashPos = base.indexOf('/');
+  if (slashPos >= 0) base = base.substring(0, slashPos);
   int arrowPos = base.indexOf(F("->"));
   if (arrowPos >= 0) base = base.substring(0, arrowPos);
   int colon = base.lastIndexOf(':');
@@ -693,6 +781,7 @@ static size_t flushTripAccumulator(TripAccumulator& accum, ParseContext& ctx) {
   size_t added = 0;
   bool tripAssigned = false;
   for (size_t stopOrder = 0; stopOrder < ctx.stops.size() && !tripAssigned; ++stopOrder) {
+    if (!routeAllowed(ctx.stops[stopOrder], ctx.agency, accum.trip.routeId)) continue;
     size_t bestIdx = TripAccumulator::kMaxPendingStops;
     time_t bestDep = 0;
     for (size_t idx = 0; idx < accum.matchCount; ++idx) {
@@ -1065,7 +1154,7 @@ std::unique_ptr<DepartModel> GtfsRtSource::fetch(std::time_t now) {
 
   //DEBUG_PRINTLN(F("DepartStrip: GTFS-RT building board"));
 
-  const size_t MAX_ITEMS = 24;
+  const size_t MAX_ITEMS = 48;
   size_t totalItems = 0;
 
   std::unique_ptr<DepartModel> model(new DepartModel());
@@ -1203,6 +1292,13 @@ bool GtfsRtSource::readFromConfig(JsonObject& root, bool startup_complete, bool&
       base = base.substring(0, equalsPos);
     }
 
+    String routes;
+    int slashPos = base.indexOf('/');
+    if (slashPos >= 0) {
+      routes = normalizeRouteList(base.substring(slashPos + 1));
+      base = base.substring(0, slashPos);
+    }
+
     int arrowPos = base.indexOf(F("->"));
     if (arrowPos >= 0) {
       dest = base.substring(arrowPos + 2);
@@ -1233,6 +1329,10 @@ bool GtfsRtSource::readFromConfig(JsonObject& root, bool startup_complete, bool&
       sc += dest;
     } else {
       sc = base;
+    }
+    if (routes.length() > 0) {
+      sc += '/';
+      sc += routes;
     }
     if (label.length() > 0) {
       sc += '=';
