@@ -115,6 +115,8 @@ namespace {
     {"AC", "805",  0x800058, false},
     {"AC", "851",  0x496F80, false},
     {"AC", "F",    0x803000, false},
+    {"AC", "NL",   0x234880, false}, // Transbay, blue on the AC map (2B589C scaled)
+    {"AC", "NX",   0x78500C, false}, // Transbay, gold on the AC map (BC8E2D, saturated for LEDs)
 
     // Metro-North Railroad core line
     {"MNR", "1",         0x009B3A, false}, // Hudson Line brand green
