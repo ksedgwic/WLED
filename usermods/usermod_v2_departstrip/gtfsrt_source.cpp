@@ -14,6 +14,11 @@
 
 #include <pb_decode.h>
 
+#if defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32)
+#include "lwip/dns.h"
+#include "lwip/ip_addr.h"
+#endif
+
 namespace {
 
 // Trim leading and trailing ASCII whitespace from a std::string.
@@ -1290,6 +1295,59 @@ String GtfsRtSource::composeUrl(const String& agency, const String& stopCode) co
   return url;
 }
 
+#if defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32)
+// Debug builds only: resolve the URL's host the same way HTTPClient will
+// (WiFi.hostByName) and log the outcome, its duration, and the DNS servers
+// as seen by the Arduino network layer (WiFi.dnsIP) and by lwIP itself
+// (dns_getserver). The two can disagree when something rewrites lwIP's
+// server list behind the network layer's back.
+static String debugHostFromUrl(const String& url) {
+  int schemeIdx = url.indexOf(F("://"));
+  int hostStart = (schemeIdx >= 0) ? schemeIdx + 3 : 0;
+  int end = url.indexOf('/', hostStart);
+  String authority = (end >= 0) ? url.substring(hostStart, end) : url.substring(hostStart);
+  int at = authority.lastIndexOf('@');
+  if (at >= 0) authority = authority.substring(at + 1);
+  int colon = authority.lastIndexOf(':');
+  if (colon >= 0) authority = authority.substring(0, colon);
+  authority.trim();
+  return authority;
+}
+
+static bool debugProbeDns(const String& url) {
+  String host = debugHostFromUrl(url);
+  if (!host.length()) return true;
+  IPAddress literal;
+  if (literal.fromString(host)) return true;  // no lookup needed
+
+  IPAddress resolved;
+  unsigned long t0 = millis();
+  bool ok = WiFi.hostByName(host.c_str(), resolved) && (uint32_t)resolved != 0;
+  unsigned long dt = millis() - t0;
+
+  String lw0, lw1;
+  const ip_addr_t* s0 = dns_getserver(0);
+  const ip_addr_t* s1 = dns_getserver(1);
+  lw0 = s0 ? ipaddr_ntoa(s0) : "-";   // ipaddr_ntoa shares one buffer
+  lw1 = s1 ? ipaddr_ntoa(s1) : "-";
+
+  DEBUG_PRINTF("DepartStrip: DNS probe '%s' -> %s %s in %lums (dnsIP0=%s dnsIP1=%s lwip0=%s lwip1=%s wifi=%d rssi=%ld ip=%s gw=%s)\n",
+               host.c_str(),
+               ok ? "OK" : "FAIL",
+               ok ? resolved.toString().c_str() : "-",
+               dt,
+               WiFi.dnsIP(0).toString().c_str(),
+               WiFi.dnsIP(1).toString().c_str(),
+               lw0.c_str(),
+               lw1.c_str(),
+               (int)WiFi.status(),
+               (long)WiFi.RSSI(),
+               WiFi.localIP().toString().c_str(),
+               WiFi.gatewayIP().toString().c_str());
+  return ok;
+}
+#endif
+
 bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus, HTTPClient& http, bool& usedSecure) {
   http.setTimeout(10000);
   bool localSecure = false;
@@ -1298,6 +1356,16 @@ bool GtfsRtSource::httpBegin(const String& url, int& outLen, int& outStatus, HTT
     DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: no HTTP client available"));
     return false;
   }
+
+#if defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32)
+  // Debug builds: a failed lookup here would fail again inside http.GET()
+  // after the same timeout, so give up now and keep the retry timing clean.
+  if (!debugProbeDns(url)) {
+    httpTransport_.end(localSecure);
+    DEBUG_PRINTLN(F("DepartStrip: GtfsRtSource::fetch: skipping GET, host lookup failed"));
+    return false;
+  }
+#endif
 
   if (!http.begin(*client, url)) {
     http.end();
